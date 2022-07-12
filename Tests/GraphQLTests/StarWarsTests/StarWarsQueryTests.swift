@@ -126,6 +126,49 @@ class StarWarsQueryTests : XCTestCase {
         XCTAssertEqual(result, expected)
     }
 
+    func testOptionalVariable() throws{
+        
+        let query = "query FetchHeroByEpisodeQuery($episode: String) {" +
+            "    hero(episode: $episode) {" +
+            "        name" +
+            "    }" +
+        "}"
+        
+        var params: [String: Map]
+        var expected: Map
+        var result: Map
+        
+        // $episode is not required so we can omit and expect this to work and return R2
+        params = [:]
+        
+        expected = [
+            "data": [
+                "hero": [
+                    "name": "R2-D2",
+                ],
+            ],
+        ]
+
+        result = try graphql(schema: StarWarsSchema, request: query, variableValues: params)
+        XCTAssertEqual(result, expected)
+        
+        // or we can pass "EMPIRE" and expect Luke
+        params = [
+            "episode": "EMPIRE",
+        ]
+        
+        expected = [
+            "data": [
+                "hero": [
+                    "name": "Luke Skywalker",
+                ],
+            ],
+        ]
+        
+        result = try graphql(schema: StarWarsSchema, request: query, variableValues: params)
+        XCTAssertEqual(result, expected)
+    }
+    
     func testFetchSomeIDQuery() throws {
         let query = "query FetchSomeIDQuery($someId: String!) {" +
                     "    human(id: $someId) {" +
@@ -444,15 +487,15 @@ class StarWarsQueryTests : XCTestCase {
             fields: [
                 "nullableA": GraphQLField(
                     type: GraphQLTypeReference("A"),
-                    resolve: { _ in [:] }
+                    resolve: { _, _, _, _ in [:] }
                 ),
                 "nonNullA": GraphQLField(
                     type: GraphQLNonNull(GraphQLTypeReference("A")),
-                    resolve: { _ in [:] }
+                    resolve: { _, _, _, _ in [:] }
                 ),
                 "throws": GraphQLField(
                     type: GraphQLNonNull(GraphQLString),
-                    resolve: { _ in
+                    resolve: { _, _, _, _ in
                         struct 🏃 : Error, CustomStringConvertible {
                             let description: String
                         }
@@ -468,7 +511,7 @@ class StarWarsQueryTests : XCTestCase {
             fields: [
                 "nullableA": GraphQLField(
                     type: A,
-                    resolve: { _ in [:] }
+                    resolve: { _, _, _, _ in [:] }
                 )
             ]
         )
@@ -516,6 +559,7 @@ extension StarWarsQueryTests {
             ("testHeroNameAndFriendsQuery", testHeroNameAndFriendsQuery),
             ("testNestedQuery", testNestedQuery),
             ("testFetchLukeQuery", testFetchLukeQuery),
+            ("testOptionalVariable", testOptionalVariable),
             ("testFetchSomeIDQuery", testFetchSomeIDQuery),
             ("testFetchLukeAliasedQuery", testFetchLukeAliasedQuery),
             ("testFetchLukeAndLeiaAliasedQuery", testFetchLukeAndLeiaAliasedQuery),
@@ -525,7 +569,8 @@ extension StarWarsQueryTests {
             ("testCheckTypeOfLukeQuery", testCheckTypeOfLukeQuery),
             ("testSecretBackstoryQuery", testSecretBackstoryQuery),
             ("testSecretBackstoryListQuery", testSecretBackstoryListQuery),
-            ("testNonNullableFieldsQuery", testNonNullableFieldsQuery),
+            ("testSecretBackstoryAliasQuery",testSecretBackstoryAliasQuery),
+            ("testNonNullableFieldsQuery", testNonNullableFieldsQuery)
         ]
     }
 }
