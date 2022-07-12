@@ -27,13 +27,21 @@
 final class ExecutionContext {
   let schema: GraphQLSchema
   let fragments: [String: FragmentDefinition]
-  let rootValue: Map
-  let contextValue: Map
+  let rootValue: Any
+  let contextValue: Any
   let operation: OperationDefinition
   let variableValues: [String: Map]
   var errors: [GraphQLError]
 
-    init(schema: GraphQLSchema, fragments: [String: FragmentDefinition], rootValue: Map, contextValue: Map, operation: OperationDefinition, variableValues: [String: Map], errors: [GraphQLError]) {
+    init(
+        schema: GraphQLSchema,
+        fragments: [String: FragmentDefinition],
+        rootValue: Any,
+        contextValue: Any,
+        operation: OperationDefinition,
+        variableValues: [String: Map],
+        errors: [GraphQLError]
+    ) {
         self.schema = schema
         self.fragments = fragments
         self.rootValue = rootValue
@@ -48,13 +56,17 @@ final class ExecutionContext {
 /**
  * Implements the "Evaluating requests" section of the GraphQL specification.
  *
- * Returns a Promise that will eventually be resolved and never rejected.
- *
  * If the arguments to this func do not result in a legal execution context,
  * a GraphQLError will be thrown immediately explaining the invalid input.
  */
-func execute(schema: GraphQLSchema, documentAST: Document, rootValue: Map, contextValue: Map, variableValues: [String: Map] = [:], operationName: String? = nil) throws -> Map {
-
+func execute(
+    schema: GraphQLSchema,
+    documentAST: Document,
+    rootValue: Any,
+    contextValue: Any,
+    variableValues: [String: Map] = [:],
+    operationName: String? = nil
+) throws -> Map {
     // If a valid context cannot be created due to incorrect arguments,
     // this will throw an error.
     let context = try buildExecutionContext(
@@ -73,9 +85,21 @@ func execute(schema: GraphQLSchema, documentAST: Document, rootValue: Map, conte
             rootValue: rootValue
         )
 
-        return ["data": data]
+        var dataMap: Map = [:]
+
+        for (key, value) in data {
+            dataMap[key] = try map(from: value)
+        }
+
+        var result: [String: Map] = ["data": dataMap]
+
+        if !context.errors.isEmpty {
+            result["errors"] = context.errors.map
+        }
+
+        return .dictionary(result)
     } catch let error as GraphQLError {
-        return ["error": [error].map]
+        return ["errors": [error].map]
     }
 }
 
@@ -85,7 +109,14 @@ func execute(schema: GraphQLSchema, documentAST: Document, rootValue: Map, conte
  *
  * Throws a GraphQLError if a valid execution context cannot be created.
  */
-func buildExecutionContext(schema: GraphQLSchema, documentAST: Document, rootValue: Map, contextValue: Map, rawVariableValues: [String: Map], operationName: String?) throws -> ExecutionContext {
+func buildExecutionContext(
+    schema: GraphQLSchema,
+    documentAST: Document,
+    rootValue: Any,
+    contextValue: Any,
+    rawVariableValues: [String: Map],
+    operationName: String?
+) throws -> ExecutionContext {
     let errors: [GraphQLError] = []
     var possibleOperation: OperationDefinition? = nil
     var fragments: [String: FragmentDefinition] = [:]
@@ -142,15 +173,22 @@ func buildExecutionContext(schema: GraphQLSchema, documentAST: Document, rootVal
 /**
  * Implements the "Evaluating operations" section of the spec.
  */
-func executeOperation(exeContext: ExecutionContext, operation: OperationDefinition, rootValue: Map) throws -> Map {
+func executeOperation(
+    exeContext: ExecutionContext,
+    operation: OperationDefinition,
+    rootValue: Any
+) throws -> [String : Any] {
     let type = try getOperationRootType(schema: exeContext.schema, operation: operation)
+
+    var inputFields: [String : [Field]] = [:]
+    var visitedFragmentNames: [String : Bool] = [:]
 
     let fields = try collectFields(
         exeContext: exeContext,
         runtimeType: type,
         selectionSet: operation.selectionSet,
-        fields: [:],
-        visitedFragmentNames: [:]
+        fields: &inputFields,
+        visitedFragmentNames: &visitedFragmentNames
     )
 
     let path: [IndexPathElement] = []
@@ -177,7 +215,10 @@ func executeOperation(exeContext: ExecutionContext, operation: OperationDefiniti
 /**
  * Extracts the root type of the operation from the schema.
  */
-func getOperationRootType(schema: GraphQLSchema, operation: OperationDefinition) throws -> GraphQLObjectType {
+func getOperationRootType(
+    schema: GraphQLSchema,
+    operation: OperationDefinition
+) throws -> GraphQLObjectType {
   switch operation.operation {
     case .query:
       return schema.queryType
@@ -188,6 +229,7 @@ func getOperationRootType(schema: GraphQLSchema, operation: OperationDefinition)
             nodes: [operation]
         )
       }
+
       return mutationType
     case .subscription:
       guard let subscriptionType = schema.subscriptionType else {
@@ -196,12 +238,8 @@ func getOperationRootType(schema: GraphQLSchema, operation: OperationDefinition)
             nodes: [operation]
         )
       }
+
       return subscriptionType
-//    default:
-//      throw GraphQLError(
-//        message: "Can only execute queries, mutations and subscriptions",
-//        nodes: [operation]
-//      )
   }
 }
 
@@ -209,7 +247,13 @@ func getOperationRootType(schema: GraphQLSchema, operation: OperationDefinition)
  * Implements the "Evaluating selection sets" section of the spec
  * for "write" mode.
  */
-func executeFieldsSerially(exeContext: ExecutionContext, parentType: GraphQLObjectType, sourceValue: Map, path: [IndexPathElement], fields: [String: [Field]]) throws -> Map {
+func executeFieldsSerially(
+    exeContext: ExecutionContext,
+    parentType: GraphQLObjectType,
+    sourceValue: Any,
+    path: [IndexPathElement],
+    fields: [String: [Field]]
+) throws -> [String: Any] {
     return try fields.reduce([:]) { results, field in
         var results = results
         let fieldASTs = field.value
@@ -223,12 +267,7 @@ func executeFieldsSerially(exeContext: ExecutionContext, parentType: GraphQLObje
             path: fieldPath
         )
 
-        guard let r = result else {
-            return results
-        }
-
-        results[field.key] = r
-        
+        results[field.key] = result ?? Map.null
         return results
     }
 }
@@ -237,31 +276,20 @@ func executeFieldsSerially(exeContext: ExecutionContext, parentType: GraphQLObje
  * Implements the "Evaluating selection sets" section of the spec
  * for "read" mode.
  */
-func executeFields(exeContext: ExecutionContext, parentType: GraphQLObjectType, sourceValue: Map,
-                   path: [IndexPathElement], fields: [String: [Field]]) throws -> Map {
-    let finalResults: [String: Map] = try fields.reduce([:]) { results, field in
-        var results = results
-        let fieldASTs = field.value
-        let fieldPath = path + [field.key] as [IndexPathElement]
-
-        let result = try resolveField(
-            exeContext: exeContext,
-            parentType: parentType,
-            source: sourceValue,
-            fieldASTs: fieldASTs,
-            path: fieldPath
-        )
-
-        guard let r = result else {
-            return results
-        }
-
-        results[field.key] = r
-        
-        return results
-    }
-    
-    return .dictionary(finalResults)
+func executeFields(
+    exeContext: ExecutionContext,
+    parentType: GraphQLObjectType,
+    sourceValue: Any,
+    path: [IndexPathElement],
+    fields: [String: [Field]]
+) throws -> [String : Any] {
+    return try executeFieldsSerially(
+        exeContext: exeContext,
+        parentType: parentType,
+        sourceValue: sourceValue,
+        path: path,
+        fields: fields
+    )
 }
 
 /**
@@ -273,69 +301,98 @@ func executeFields(exeContext: ExecutionContext, parentType: GraphQLObjectType, 
  * Object type returned by that field.
  */
 @discardableResult
-func collectFields(exeContext: ExecutionContext, runtimeType: GraphQLObjectType, selectionSet: SelectionSet, fields: [String: [Field]],
-  visitedFragmentNames: [String: Bool]) throws -> [String: [Field]] {
-    var fields = fields
+func collectFields(
+    exeContext: ExecutionContext,
+    runtimeType: GraphQLObjectType,
+    selectionSet: SelectionSet,
+    fields: inout [String: [Field]],
+    visitedFragmentNames: inout [String: Bool]
+) throws -> [String: [Field]] {
     var visitedFragmentNames = visitedFragmentNames
 
     for selection in selectionSet.selections {
-    switch selection {
-      case let selection as Field:
-        if try !shouldIncludeNode(exeContext: exeContext, directives: selection.directives) {
-          continue
+        switch selection {
+        case let field as Field:
+            let shouldInclude = try shouldIncludeNode(
+                exeContext: exeContext,
+                directives: field.directives
+            )
+
+            guard shouldInclude else {
+                continue
+            }
+
+            let name = getFieldEntryKey(node: field)
+
+            if fields[name] == nil {
+                fields[name] = []
+            }
+
+            fields[name]?.append(field)
+        case let inlineFragment as InlineFragment:
+            let shouldInclude = try shouldIncludeNode(
+                exeContext: exeContext,
+                directives: inlineFragment.directives
+            )
+
+            let fragmentConditionMatches = try doesFragmentConditionMatch(
+                exeContext: exeContext,
+                fragment: inlineFragment,
+                type: runtimeType
+            )
+
+            guard shouldInclude && fragmentConditionMatches else {
+                continue
+            }
+
+            try collectFields(
+                exeContext: exeContext,
+                runtimeType: runtimeType,
+                selectionSet: inlineFragment.selectionSet,
+                fields: &fields,
+                visitedFragmentNames: &visitedFragmentNames
+            )
+        case let fragmentSpread as FragmentSpread:
+            let fragmentName = fragmentSpread.name.value
+
+            let shouldInclude = try shouldIncludeNode(
+                exeContext: exeContext,
+                directives: fragmentSpread.directives
+            )
+
+            guard visitedFragmentNames[fragmentName] == nil && shouldInclude else {
+                continue
+            }
+
+            visitedFragmentNames[fragmentName] = true
+
+            guard let fragment = exeContext.fragments[fragmentName] else {
+                continue
+            }
+
+            let fragmentConditionMatches = try doesFragmentConditionMatch(
+                exeContext: exeContext,
+                fragment: fragment,
+                type: runtimeType
+            )
+
+            guard fragmentConditionMatches else {
+                continue
+            }
+
+            try collectFields(
+                exeContext: exeContext,
+                runtimeType: runtimeType,
+                selectionSet: fragment.selectionSet,
+                fields: &fields,
+                visitedFragmentNames: &visitedFragmentNames
+            )
+        default:
+            break
         }
-
-        let name = getFieldEntryKey(node: selection)
-
-        if fields[name] == nil {
-          fields[name] = []
-        }
-
-        fields[name]?.append(selection)
-      case let selection as InlineFragment:
-        if try !shouldIncludeNode(exeContext: exeContext, directives: selection.directives) ||
-           !doesFragmentConditionMatch(exeContext: exeContext, fragment: selection, type: runtimeType) {
-          continue
-        }
-
-        try collectFields(
-            exeContext: exeContext,
-            runtimeType: runtimeType,
-            selectionSet: selection.selectionSet,
-            fields: fields,
-            visitedFragmentNames: visitedFragmentNames
-        )
-
-      case let selection as FragmentSpread:
-        let fragName = selection.name.value
-
-        if try visitedFragmentNames[fragName] != nil ||
-            !shouldIncludeNode(exeContext: exeContext, directives: selection.directives) {
-          continue
-        }
-
-        visitedFragmentNames[fragName] = true
-        guard let fragment = exeContext.fragments[fragName] else {
-            continue
-        }
-
-        if !doesFragmentConditionMatch(exeContext: exeContext, fragment: fragment, type: runtimeType) {
-          continue
-        }
-
-        try collectFields(
-            exeContext: exeContext,
-            runtimeType: runtimeType,
-            selectionSet: fragment.selectionSet,
-            fields: fields,
-            visitedFragmentNames: visitedFragmentNames
-        )
-    default:
-        break
     }
-  }
-
-  return fields
+    
+    return fields
 }
 
 /**
@@ -344,25 +401,25 @@ func collectFields(exeContext: ExecutionContext, runtimeType: GraphQLObjectType,
  */
 func shouldIncludeNode(exeContext: ExecutionContext, directives: [Directive] = []) throws -> Bool {
     if let skipAST = directives.find({ $0.name.value == GraphQLSkipDirective.name }) {
-        let skipIf = try getArgumentValues(
+        let skip = try getArgumentValues(
             argDefs: GraphQLSkipDirective.args,
             argASTs: skipAST.arguments,
             variableValues: exeContext.variableValues
-        )["if"]
+        )
 
-        if let skipIf = skipIf, skipIf == .bool(true) {
+        if skip["if"] == .bool(true) {
             return false
         }
     }
 
     if let includeAST = directives.find({ $0.name.value == GraphQLIncludeDirective.name }) {
-        let includeIf = try getArgumentValues(
+        let include = try getArgumentValues(
             argDefs: GraphQLIncludeDirective.args,
             argASTs: includeAST.arguments,
             variableValues: exeContext.variableValues
-        )["if"]
+        )
 
-        if let includeIf = includeIf, includeIf == .bool(false) {
+        if include["if"] == .bool(false) {
             return false
         }
     }
@@ -373,7 +430,11 @@ func shouldIncludeNode(exeContext: ExecutionContext, directives: [Directive] = [
 /**
  * Determines if a fragment is applicable to the given type.
  */
-func doesFragmentConditionMatch(exeContext: ExecutionContext, fragment: HasTypeCondition, type: GraphQLObjectType) -> Bool {
+func doesFragmentConditionMatch(
+    exeContext: ExecutionContext,
+    fragment: HasTypeCondition,
+    type: GraphQLObjectType
+) throws -> Bool {
     guard let typeConditionAST = fragment.getTypeCondition() else {
         return true
     }
@@ -382,8 +443,12 @@ func doesFragmentConditionMatch(exeContext: ExecutionContext, fragment: HasTypeC
         return true
     }
 
+    if let conditionalType = conditionalType as? GraphQLObjectType, conditionalType.name == type.name {
+        return true
+    }
+
     if let abstractType = conditionalType as? GraphQLAbstractType {
-        return exeContext.schema.isPossibleType(abstractType: abstractType, possibleType: type)
+        return try exeContext.schema.isPossibleType(abstractType: abstractType, possibleType: type)
     }
     
     return false
@@ -402,19 +467,26 @@ func getFieldEntryKey(node: Field) -> String {
  * then calls completeValue to complete promises, serialize scalars, or execute
  * the sub-selection-set for objects.
  */
-func resolveField(exeContext: ExecutionContext, parentType: GraphQLObjectType, source: Map,
-                  fieldASTs: [Field], path: [IndexPathElement]) throws -> Map? {
+func resolveField(
+    exeContext: ExecutionContext,
+    parentType: GraphQLObjectType,
+    source: Any,
+    fieldASTs: [Field],
+    path: [IndexPathElement]
+) throws -> Any? {
     let fieldAST = fieldASTs[0]
     let fieldName = fieldAST.name.value
 
-    guard let fieldDef = getFieldDef(schema: exeContext.schema, parentType: parentType, fieldName: fieldName) else {
-        return nil // TODO: this used to be "undefined"
-    }
+    let fieldDef = getFieldDef(
+        schema: exeContext.schema,
+        parentType: parentType,
+        fieldName: fieldName
+    )
 
     let returnType = fieldDef.type
     let resolve = fieldDef.resolve ?? defaultResolve
 
-    // Build a JS object of arguments from the field.arguments AST, using the
+    // Build a Map object of arguments from the field.arguments AST, using the
     // variables scope to fulfill any variable references.
     // TODO: find a way to memoize, in case this field is within a List type.
     let args = try getArgumentValues(
@@ -445,7 +517,13 @@ func resolveField(exeContext: ExecutionContext, parentType: GraphQLObjectType, s
 
     // Get the resolve func, regardless of if its result is normal
     // or abrupt (error).
-    let result = try resolve(source, args, context, info)
+    let result = resolveOrError(
+        resolve: resolve,
+        source: source,
+        args: args,
+        context: context,
+        info: info
+    )
     
     return try completeValueCatchingError(
         exeContext: exeContext,
@@ -457,9 +535,37 @@ func resolveField(exeContext: ExecutionContext, parentType: GraphQLObjectType, s
     )
 }
 
+enum ResultOrError {
+    case result(Any?)
+    case error(Error)
+}
+
+// Isolates the "ReturnOrAbrupt" behavior to not de-opt the `resolveField`
+// function. Returns the result of `resolve` or the abrupt-return Error object.
+func resolveOrError(
+    resolve: GraphQLFieldResolve,
+    source: Any,
+    args: Map,
+    context: Any,
+    info: GraphQLResolveInfo
+)-> ResultOrError {
+    do {
+        return try .result(resolve(source, args, context, info))
+    } catch {
+        return .error(error)
+    }
+}
+
 // This is a small wrapper around completeValue which detects and logs errors
 // in the execution context.
-func completeValueCatchingError(exeContext: ExecutionContext, returnType: GraphQLType, fieldASTs: [Field], info: GraphQLResolveInfo, path: [IndexPathElement], result: Map) throws -> Map? {
+func completeValueCatchingError(
+    exeContext: ExecutionContext,
+    returnType: GraphQLType,
+    fieldASTs: [Field],
+    info: GraphQLResolveInfo,
+    path: [IndexPathElement],
+    result: ResultOrError
+) throws -> Any? {
     // If the field type is non-nullable, then it is resolved without any
     // protection from errors, however it still properly locates the error.
     if let returnType = returnType as? GraphQLNonNull {
@@ -488,9 +594,9 @@ func completeValueCatchingError(exeContext: ExecutionContext, returnType: GraphQ
         return completed
     } catch let error as GraphQLError {
         // If `completeValueWithLocatedError` returned abruptly (threw an error),
-        // log the error and return null.
+        // log the error and return .null.
         exeContext.errors.append(error)
-        return .null // TODO: this was nil before
+        return nil
     } catch {
         fatalError()
     }
@@ -498,7 +604,14 @@ func completeValueCatchingError(exeContext: ExecutionContext, returnType: GraphQ
 
 // This is a small wrapper around completeValue which annotates errors with
 // location information.
-func completeValueWithLocatedError(exeContext: ExecutionContext, returnType: GraphQLType, fieldASTs: [Field], info: GraphQLResolveInfo, path: [IndexPathElement], result: Map) throws -> Map? {
+func completeValueWithLocatedError(
+    exeContext: ExecutionContext,
+    returnType: GraphQLType,
+    fieldASTs: [Field],
+    info: GraphQLResolveInfo,
+    path: [IndexPathElement],
+    result: ResultOrError
+) throws -> Any? {
     do {
         let completed = try completeValue(
             exeContext: exeContext,
@@ -511,7 +624,11 @@ func completeValueWithLocatedError(exeContext: ExecutionContext, returnType: Gra
 
         return completed
     } catch {
-        throw locatedError(originalError: error, nodes: fieldASTs, path: path)
+        throw locatedError(
+            originalError: error,
+            nodes: fieldASTs,
+            path: path
+        )
     }
 }
 
@@ -536,97 +653,116 @@ func completeValueWithLocatedError(exeContext: ExecutionContext, returnType: Gra
  * Otherwise, the field type expects a sub-selection set, and will complete the
  * value by evaluating all sub-selections.
  */
-func completeValue(exeContext: ExecutionContext, returnType: GraphQLType, fieldASTs: [Field], info: GraphQLResolveInfo, path: [IndexPathElement], result: Map) throws -> Map? {
-    // If field type is NonNull, complete for inner type, and throw field error
-    // if result is null.
-    if let returnType = returnType as? GraphQLNonNull {
-        let completed = try completeValue(
-            exeContext: exeContext,
-            returnType: returnType.ofType,
-            fieldASTs: fieldASTs,
-            info: info,
-            path: path,
-            result: result
-        )
+func completeValue(
+    exeContext: ExecutionContext,
+    returnType: GraphQLType,
+    fieldASTs: [Field],
+    info: GraphQLResolveInfo,
+    path: [IndexPathElement],
+    result: ResultOrError
+) throws -> Any? {
+    switch result {
+    case .error(let error):
+        throw error
+    case .result(let result):
+        // If field type is NonNull, complete for inner type, and throw field error
+        // if result is nullish.
+        if let returnType = returnType as? GraphQLNonNull {
+            let completed = try completeValue(
+                exeContext: exeContext,
+                returnType: returnType.ofType,
+                fieldASTs: fieldASTs,
+                info: info,
+                path: path,
+                result: .result(result)
+            )
 
-        guard let c = completed else {
-            throw GraphQLError(
-                message: "Cannot return null for non-nullable field \(info.parentType.name).\(info.fieldName)."
+            guard let reallyCompleted = completed else {
+                throw GraphQLError(
+                    message: "Cannot return null for non-nullable field \(info.parentType.name).\(info.fieldName)."
+                )
+            }
+
+            return reallyCompleted
+        }
+
+        // If result value is null-ish (nil or .null) then return .null.
+        guard let res = result, let r = unwrap(res) else {
+            return nil
+        }
+
+        // If field type is List, complete each item in the list with the inner type
+        if let returnType = returnType as? GraphQLList {
+            return try completeListValue(
+                exeContext: exeContext,
+                returnType: returnType,
+                fieldASTs: fieldASTs,
+                info: info,
+                path: path,
+                result: r
             )
         }
 
-        return c
-    }
+        // If field type is a leaf type, Scalar or Enum, serialize to a valid value,
+        // returning .null if serialization is not possible.
+        if let returnType = returnType as? GraphQLLeafType {
+            return try completeLeafValue(returnType: returnType, result: r)
+        }
 
-    // If result value is null-ish (null, undefined, or NaN) then return null.
-    if isNullish(result) {
-        return nil
-    }
+        // If field type is an abstract type, Interface or Union, determine the
+        // runtime Object type and complete for that type.
+        if let returnType = returnType as? GraphQLAbstractType {
+            return try completeAbstractValue(
+                exeContext: exeContext,
+                returnType: returnType,
+                fieldASTs: fieldASTs,
+                info: info,
+                path: path,
+                result: r
+            )
+        }
 
-    // If field type is List, complete each item in the list with the inner type
-    if let returnType = returnType as? GraphQLList {
-        return try completeListValue(
-            exeContext: exeContext,
-            returnType: returnType,
-            fieldASTs: fieldASTs,
-            info: info,
-            path: path,
-            result: result
+        // If field type is Object, execute and complete all sub-selections.
+        if let returnType = returnType as? GraphQLObjectType {
+            return try completeObjectValue(
+                exeContext: exeContext,
+                returnType: returnType,
+                fieldASTs: fieldASTs,
+                info: info,
+                path: path,
+                result: r
+            )
+        }
+        
+        // Not reachable. All possible output types have been considered.
+        throw GraphQLError(
+            message: "Cannot complete value of unexpected type \"\(returnType)\"."
         )
     }
-
-    // If field type is a leaf type, Scalar or Enum, serialize to a valid value,
-    // returning null if serialization is not possible.
-    if let returnType = returnType as? GraphQLLeafType {
-        return try completeLeafValue(returnType: returnType, result: result)
-    }
-
-    // If field type is an abstract type, Interface or Union, determine the
-    // runtime Object type and complete for that type.
-    if let returnType = returnType as? GraphQLAbstractType {
-        return try completeAbstractValue(
-            exeContext: exeContext,
-            returnType: returnType,
-            fieldASTs: fieldASTs,
-            info: info,
-            path: path,
-            result: result
-        )
-    }
-
-    // If field type is Object, execute and complete all sub-selections.
-    if let returnType = returnType as? GraphQLObjectType {
-        return try completeObjectValue(
-            exeContext: exeContext,
-            returnType: returnType,
-            fieldASTs: fieldASTs,
-            info: info,
-            path: path,
-            result: result
-        )
-    }
-    
-    // Not reachable. All possible output types have been considered.
-    throw GraphQLError(
-        message: "Cannot complete value of unexpected type \"\(returnType)\"."
-    )
 }
 
 /**
  * Complete a list value by completing each item in the list with the
  * inner type
  */
-func completeListValue(exeContext: ExecutionContext, returnType: GraphQLList, fieldASTs: [Field], info: GraphQLResolveInfo, path: [IndexPathElement], result: Map) throws -> Map? {
-    guard case .array(let result) = result else {
+func completeListValue(
+    exeContext: ExecutionContext,
+    returnType: GraphQLList,
+    fieldASTs: [Field],
+    info: GraphQLResolveInfo,
+    path: [IndexPathElement],
+    result: Any
+) throws -> Any? {
+    guard let result = result as? [Any?] else {
         throw GraphQLError(
             message:
-            "Expected Iterable, but did not find one for field " +
+            "Expected array, but did not find one for field " +
             "\(info.parentType.name).\(info.fieldName)."
         )
     }
 
     let itemType = returnType.ofType
-    var completedResults: [Map] = []
+    var completedResults: [Any?] = []
 
     for (index, item) in result.enumerated() {
         // No need to modify the info object containing the path,
@@ -639,27 +775,28 @@ func completeListValue(exeContext: ExecutionContext, returnType: GraphQLList, fi
             fieldASTs: fieldASTs,
             info: info,
             path: fieldPath,
-            result: item
+            result: .result(item)
         )
 
-        guard let c = completedItem else {
-            return nil
-        }
-
-        completedResults.append(c)
+        completedResults.append(completedItem)
     }
     
-    return .array(completedResults)
+    return completedResults
 }
 
 /**
  * Complete a Scalar or Enum by serializing to a valid value, returning
- * null if serialization is not possible.
+ * .null if serialization is not possible.
  */
-func completeLeafValue(returnType: GraphQLLeafType, result: Map) throws -> Map {
+func completeLeafValue(returnType: GraphQLLeafType, result: Any?) throws -> Map {
+    // TODO: check this out
+    guard let result = result else {
+        return .null
+    }
+
     let serializedResult = try returnType.serialize(value: result)
 
-    if isNullish(serializedResult) {
+    if serializedResult == .null {
         throw GraphQLError(
             message:
             "Expected a value of type \"\(returnType)\" but " +
@@ -667,16 +804,29 @@ func completeLeafValue(returnType: GraphQLLeafType, result: Map) throws -> Map {
         )
     }
     
-    return serializedResult!
+    return serializedResult
 }
 
 /**
  * Complete a value of an abstract type by determining the runtime object type
  * of that value, then complete the value for that type.
  */
-func completeAbstractValue(exeContext: ExecutionContext, returnType: GraphQLAbstractType, fieldASTs: [Field], info: GraphQLResolveInfo, path: [IndexPathElement], result: Map) throws -> Map {
-    let resolveRes = try returnType.resolveType?(result, exeContext.contextValue, info) ??
-        defaultResolveType(value: result, context: exeContext.contextValue, info: info, abstractType: returnType).map({ .type($0) })
+func completeAbstractValue(
+    exeContext: ExecutionContext,
+    returnType: GraphQLAbstractType,
+    fieldASTs: [Field],
+    info: GraphQLResolveInfo,
+    path: [IndexPathElement],
+    result: Any
+) throws -> Any? {
+    var resolveRes = try returnType.resolveType?(result, exeContext.contextValue, info).typeResolveResult
+
+    resolveRes = try resolveRes ?? defaultResolveType(
+        value: result,
+        context: exeContext.contextValue,
+        info: info,
+        abstractType: returnType
+    )
 
     guard let resolveResult = resolveRes else {
         throw GraphQLError(
@@ -699,13 +849,13 @@ func completeAbstractValue(exeContext: ExecutionContext, returnType: GraphQLAbst
         throw GraphQLError(
             message:
             "Abstract type \(returnType.name) must resolve to an Object type at " +
-                "runtime for field \(info.parentType.name).\(info.fieldName) with " +
+            "runtime for field \(info.parentType.name).\(info.fieldName) with " +
             "value \"\(resolveResult)\", received \"\(runtimeType)\".",
             nodes: fieldASTs
         )
     }
 
-    if !exeContext.schema.isPossibleType(abstractType: returnType, possibleType: objectType) {
+    if try !exeContext.schema.isPossibleType(abstractType: returnType, possibleType: objectType) {
         throw GraphQLError(
             message:
             "Runtime Object type \"\(objectType.name)\" is not a possible type " +
@@ -727,11 +877,18 @@ func completeAbstractValue(exeContext: ExecutionContext, returnType: GraphQLAbst
 /**
  * Complete an Object value by executing all sub-selections.
  */
-func completeObjectValue(exeContext: ExecutionContext, returnType: GraphQLObjectType, fieldASTs: [Field], info: GraphQLResolveInfo, path: [IndexPathElement], result: Map) throws -> Map {
+func completeObjectValue(
+    exeContext: ExecutionContext,
+    returnType: GraphQLObjectType,
+    fieldASTs: [Field],
+    info: GraphQLResolveInfo,
+    path: [IndexPathElement],
+    result: Any
+) throws -> Any? {
     // If there is an isTypeOf predicate func, call it with the
     // current result. If isTypeOf returns false, then raise an error rather
     // than continuing execution.
-    if returnType.isTypeOf?(result, exeContext.contextValue, info) ?? false {
+    guard try returnType.isTypeOf?(result, exeContext.contextValue, info) ?? true else {
         throw GraphQLError(
             message:
             "Expected value of type \"\(returnType.name)\" but got: \(result).",
@@ -741,7 +898,7 @@ func completeObjectValue(exeContext: ExecutionContext, returnType: GraphQLObject
 
     // Collect sub-fields to execute to complete this value.
     var subFieldASTs: [String: [Field]] = [:]
-    let visitedFragmentNames: [String: Bool] = [:]
+    var visitedFragmentNames: [String: Bool] = [:]
 
     for fieldAST in fieldASTs {
         if let selectionSet = fieldAST.selectionSet {
@@ -749,8 +906,8 @@ func completeObjectValue(exeContext: ExecutionContext, returnType: GraphQLObject
                 exeContext: exeContext,
                 runtimeType: returnType,
                 selectionSet: selectionSet,
-                fields: subFieldASTs,
-                visitedFragmentNames: visitedFragmentNames
+                fields: &subFieldASTs,
+                visitedFragmentNames: &visitedFragmentNames
             )
         }
     }
@@ -769,31 +926,41 @@ func completeObjectValue(exeContext: ExecutionContext, returnType: GraphQLObject
  * used which tests each possible type for the abstract type by calling
  * isTypeOf for the object being coerced, returning the first type that matches.
  */
-func defaultResolveType(value: Map, context: Map, info: GraphQLResolveInfo, abstractType: GraphQLAbstractType) -> GraphQLObjectType? {
+func defaultResolveType(
+    value: Any,
+    context: Any,
+    info: GraphQLResolveInfo,
+    abstractType: GraphQLAbstractType
+) throws -> TypeResolveResult? {
     let possibleTypes = info.schema.getPossibleTypes(abstractType: abstractType)
-    return possibleTypes.find({ $0.isTypeOf?(value, context, info) ?? false })
+
+    guard let type = try possibleTypes.find({ try $0.isTypeOf?(value, context, info) ?? false }) else {
+        return nil
+    }
+
+    return .type(type)
 }
 
 /**
  * If a resolve func is not given, then a default resolve behavior is used
  * which takes the property of the source object of the same name as the field
- * and returns it as the result, or if it's a func, returns the result
- * of calling that func while passing along args and context.
+ * and returns it as the result.
  */
-func defaultResolve(source: Map, args: [String: Map], context: Map, info: GraphQLResolveInfo) -> Map {
-  // ensure source is a value for which property access is acceptable.
-    if case .dictionary(let source) = source {
-    let property = source[info.fieldName]
+func defaultResolve(source: Any, args: Map, context: Any, info: GraphQLResolveInfo) -> Any? {    
+    guard let source = unwrap(source) else {
+        return nil
+    }
 
-        // TODO: Dynamic Shit
-//    if (typeof property === 'func') {
-//      return source[info.fieldName](args, context)
-//    }
+    guard let s = source as? MapFallibleRepresentable else {
+        return nil
+    }
 
-    return property!
-  }
+    // TODO: check why Reflection fails
+    guard let value = try? get(info.fieldName, from: s) else {
+        return nil
+    }
 
-    return .null
+    return value
 }
 
 /**
@@ -805,15 +972,19 @@ func defaultResolve(source: Map, args: [String: Map], context: Map, info: GraphQ
  * added to the query type, but that would require mutating type
  * definitions, which would cause issues.
  */
-func getFieldDef(schema: GraphQLSchema, parentType: GraphQLObjectType, fieldName: String) -> GraphQLFieldDefinition? {
-//  if (fieldName === schemaMetaFieldDef.name &&
-//      schema.getQueryType() === parentType) {
-//    return SchemaMetaFieldDef
-//  } else if (fieldName === typeMetaFieldDef.name &&
-//             schema.getQueryType() === parentType) {
-//    return TypeMetaFieldDef
-//  } else if (fieldName === typeNameMetaFieldDef.name) {
-//    return TypeNameMetaFieldDef
-//  }
-  return parentType.fields[fieldName]
+func getFieldDef(
+    schema: GraphQLSchema,
+    parentType: GraphQLObjectType,
+    fieldName: String
+) -> GraphQLFieldDefinition {
+    if fieldName == SchemaMetaFieldDef.name && schema.queryType.name == parentType.name {
+        return SchemaMetaFieldDef
+    } else if fieldName == TypeMetaFieldDef.name && schema.queryType.name == parentType.name {
+        return TypeMetaFieldDef
+    } else if fieldName == TypeNameMetaFieldDef.name {
+        return TypeNameMetaFieldDef
+    }
+
+    // we know this field exists because we passed validation before execution
+    return parentType.fields[fieldName]!
 }

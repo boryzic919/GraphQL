@@ -11,81 +11,15 @@ import GraphQL
  * Wars trilogy.
  */
 
-extension Episode : MapConvertible, MapRepresentable {
-    init(map: Map) throws {
-        self = Episode(rawValue: map.string!)!
-    }
-
+// TODO: implement MapRepresentable automatically for RawRepresentables
+extension Episode : MapRepresentable {
     var map: Map {
         return rawValue.map
     }
 }
 
-extension Character {
-    var map: Map {
-        if let human = self as? Human {
-            return [
-                "id": human.id.map,
-                "name": human.name.map,
-                "friends": human.friends.map,
-                "appearsIn": human.appearsIn.map,
-                "homePlanet": human.homePlanet.map
-            ]
-        }
-
-        if let droid = self as? Droid {
-            return [
-                "id": droid.id.map,
-                "name": droid.name.map,
-                "friends": droid.friends.map,
-                "appearsIn": droid.appearsIn.map,
-                "primaryFunction": droid.primaryFunction.map
-            ]
-        }
-
-        return nil
-    }
-}
-
-extension Human : MapConvertible {
-    init(map: Map) throws {
-        id = try map.get("id")
-        name = try map.get("name")
-        friends = try map.get("friends")
-        appearsIn = try map.get("appearsIn")
-        homePlanet = try? map.get("homePlanet")
-    }
-
-    func asMap() throws -> Map {
-        return [
-            "id": id.map,
-            "name": name.map,
-            "friends": friends.map,
-            "appearsIn": appearsIn.map,
-            "homePlanet": homePlanet.map
-        ]
-    }
-}
-
-extension Droid : MapConvertible {
-    init(map: Map) throws {
-        id = try map.get("id")
-        name = try map.get("name")
-        friends = try map.get("friends")
-        appearsIn = try map.get("appearsIn")
-        primaryFunction = try map.get("primaryFunction")
-    }
-
-    func asMap() throws -> Map {
-        return [
-            "id": id.map,
-            "name": name.map,
-            "friends": friends.map,
-            "appearsIn": appearsIn.map,
-            "primaryFunction": primaryFunction.map
-        ]
-    }
-}
+extension Human : MapFallibleRepresentable {}
+extension Droid : MapFallibleRepresentable {}
 
 /**
  * Using our shorthand to describe type systems, the type system for our
@@ -131,20 +65,20 @@ extension Droid : MapConvertible {
  * This implements the following type system shorthand:
  *   enum Episode { NEWHOPE, EMPIRE, JEDI }
  */
-let episodeEnum = try! GraphQLEnumType(
+let EpisodeEnum = try! GraphQLEnumType(
     name: "Episode",
     description: "One of the films in the Star Wars Trilogy",
     values: [
-        "NEWHOPE": GraphQLEnumValueConfig(
-            value: Episode.newHope.rawValue.map,
+        "NEWHOPE": GraphQLEnumValue(
+            value: Episode.newHope,
             description: "Released in 1977."
         ),
-        "EMPIRE": GraphQLEnumValueConfig(
-            value: Episode.empire.rawValue.map,
+        "EMPIRE": GraphQLEnumValue(
+            value: Episode.empire,
             description: "Released in 1980."
         ),
-        "JEDI": GraphQLEnumValueConfig(
-            value: Episode.jedi.rawValue.map,
+        "JEDI": GraphQLEnumValue(
+            value: Episode.jedi,
             description: "Released in 1983."
         ),
     ]
@@ -162,33 +96,38 @@ let episodeEnum = try! GraphQLEnumType(
  *     secretBackstory: String
  *   }
  */
-let characterInterface = try! GraphQLInterfaceType(
+let CharacterInterface = try! GraphQLInterfaceType(
     name: "Character",
     description: "A character in the Star Wars Trilogy",
     fields: [
-        "id": GraphQLFieldConfig(
+        "id": GraphQLField(
             type: GraphQLNonNull(GraphQLString),
             description: "The id of the character."
         ),
-        "name": GraphQLFieldConfig(
+        "name": GraphQLField(
             type: GraphQLString,
             description: "The name of the character."
         ),
-        "friends": GraphQLFieldConfig(
+        "friends": GraphQLField(
             type: GraphQLList(GraphQLTypeReference("Character")),
             description: "The friends of the character, or an empty list if they have none."
         ),
-        "appearsIn": GraphQLFieldConfig(
-            type: GraphQLList(episodeEnum),
+        "appearsIn": GraphQLField(
+            type: GraphQLList(EpisodeEnum),
             description: "Which movies they appear in."
         ),
-        "secretBackstory": GraphQLFieldConfig(
+        "secretBackstory": GraphQLField(
             type: GraphQLString,
             description: "All secrets about their past."
         ),
     ],
-    resolveType: { value, _, _ in
-        return getHuman(id: value["id"].string!) != nil ? .name("Human") : .name("Droid")
+    resolveType: { character, _, _ in
+        switch character {
+        case is Human:
+            return "Human"
+        default:
+            return "Droid"
+        }
     }
 )
 
@@ -205,36 +144,35 @@ let characterInterface = try! GraphQLInterfaceType(
  *     secretBackstory: String
  *   }
  */
-let humanType = try! GraphQLObjectType(
+let HumanType = try! GraphQLObjectType(
     name: "Human",
     description: "A humanoid creature in the Star Wars universe.",
     fields: [
-        "id": GraphQLFieldConfig(
+        "id": GraphQLField(
             type: GraphQLNonNull(GraphQLString),
             description: "The id of the human."
         ),
-        "name": GraphQLFieldConfig(
+        "name": GraphQLField(
             type: GraphQLString,
             description: "The name of the human."
         ),
-        "friends": GraphQLFieldConfig(
-            type: GraphQLList(characterInterface),
+        "friends": GraphQLField(
+            type: GraphQLList(CharacterInterface),
             description: "The friends of the human, or an empty list if they " +
             "have none.",
-            resolve: { value, _, _, _ in
-                let human = try Human(map: value)
-                return getFriends(character: human).map({ $0.map }).map
+            resolve: { human, _, _, _ in
+                return getFriends(character: human as! Human)
             }
         ),
-        "appearsIn": GraphQLFieldConfig(
-            type: GraphQLList(episodeEnum),
+        "appearsIn": GraphQLField(
+            type: GraphQLList(EpisodeEnum),
             description: "Which movies they appear in."
         ),
-        "homePlanet": GraphQLFieldConfig(
+        "homePlanet": GraphQLField(
             type: GraphQLString,
             description: "The home planet of the human, or null if unknown."
         ),
-        "secretBackstory": GraphQLFieldConfig(
+        "secretBackstory": GraphQLField(
             type: GraphQLString,
             description: "Where are they from and how they came to be who they are.",
             resolve: { _ in
@@ -246,7 +184,10 @@ let humanType = try! GraphQLObjectType(
             }
         ),
     ],
-    interfaces: [characterInterface]
+    interfaces: [CharacterInterface],
+    isTypeOf: { source, _, _ in
+        source is Human
+    }
 )
 
 
@@ -263,31 +204,30 @@ let humanType = try! GraphQLObjectType(
  *     primaryFunction: String
  *   }
  */
-let droidType = try! GraphQLObjectType(
+let DroidType = try! GraphQLObjectType(
     name: "Droid",
     description: "A mechanical creature in the Star Wars universe.",
     fields: [
-        "id": GraphQLFieldConfig(
+        "id": GraphQLField(
             type: GraphQLNonNull(GraphQLString),
             description: "The id of the droid."
         ),
-        "name": GraphQLFieldConfig(
+        "name": GraphQLField(
             type: GraphQLString,
             description: "The name of the droid."
         ),
-        "friends": GraphQLFieldConfig(
-            type: GraphQLList(characterInterface),
+        "friends": GraphQLField(
+            type: GraphQLList(CharacterInterface),
             description: "The friends of the droid, or an empty list if they have none.",
-            resolve: { value, _, _, _ in
-                let droid = try Droid(map: value)
-                return getFriends(character: droid).map({ $0.map }).map
+            resolve: { droid, _, _, _ in
+                return getFriends(character: droid as! Droid)
             }
         ),
-        "appearsIn": GraphQLFieldConfig(
-            type: GraphQLList(episodeEnum),
+        "appearsIn": GraphQLField(
+            type: GraphQLList(EpisodeEnum),
             description: "Which movies they appear in."
         ),
-        "secretBackstory": GraphQLFieldConfig(
+        "secretBackstory": GraphQLField(
             type: GraphQLString,
             description: "Construction date and the name of the designer.",
             resolve: { _ in
@@ -298,12 +238,15 @@ let droidType = try! GraphQLObjectType(
                 throw Secret(description: "secretBackstory is secret.")
             }
         ),
-        "primaryFunction": GraphQLFieldConfig(
+        "primaryFunction": GraphQLField(
             type: GraphQLString,
             description: "The primary function of the droid."
         ),
     ],
-    interfaces: [characterInterface]
+    interfaces: [CharacterInterface],
+    isTypeOf: { source, _, _ in
+        source is Droid
+    }
 )
 
 
@@ -321,46 +264,46 @@ let droidType = try! GraphQLObjectType(
  *   }
  *
  */
-let queryType = try! GraphQLObjectType(
+let QueryType = try! GraphQLObjectType(
     name: "Query",
     fields: [
-        "hero": GraphQLFieldConfig(
-            type: characterInterface,
+        "hero": GraphQLField(
+            type: CharacterInterface,
             args: [
-                "episode": GraphQLArgumentConfig(
-                    type: episodeEnum,
+                "episode": GraphQLArgument(
+                    type: EpisodeEnum,
                     description:
                     "If omitted, returns the hero of the whole saga. If " +
                     "provided, returns the hero of that particular episode."
                 )
             ],
-            resolve: { _, args, _, _ in
-                let episode = Episode(rawValue: args["episode"]?.string ?? "")
-                return getHero(episode: episode).map
+            resolve: { _, arguments, _, _ in
+                let episode = Episode(arguments["episode"].string)
+                return getHero(episode: episode)
             }
         ),
-        "human": GraphQLFieldConfig(
-            type: humanType,
+        "human": GraphQLField(
+            type: HumanType,
             args: [
-                "id": GraphQLArgumentConfig(
+                "id": GraphQLArgument(
                     type: GraphQLNonNull(GraphQLString),
                     description: "id of the human"
                 )
             ],
-            resolve: { _, args, _, _ in
-                return try getHuman(id: args["id"]!.string!).asMap()
+            resolve: { _, arguments, _, _ in
+                return getHuman(id: arguments["id"].string!)
             }
         ),
-        "droid": GraphQLFieldConfig(
-            type: droidType,
+        "droid": GraphQLField(
+            type: DroidType,
             args: [
-                "id": GraphQLArgumentConfig(
+                "id": GraphQLArgument(
                     type: GraphQLNonNull(GraphQLString),
                     description: "id of the droid"
                 )
             ],
-            resolve: { _, args, _, _ in
-                return try getDroid(id: args["id"]!.string!).asMap()
+            resolve: { _, arguments, _, _ in
+                return getDroid(id: arguments["id"].string!)
             }
         ),
     ]
@@ -371,6 +314,6 @@ let queryType = try! GraphQLObjectType(
  * type we defined above) and export it.
  */
 let StarWarsSchema = try! GraphQLSchema(
-    query: queryType,
-    types: [humanType, droidType]
+    query: QueryType,
+    types: [HumanType, DroidType]
 )

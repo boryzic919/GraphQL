@@ -1,3 +1,55 @@
+public func map(from value: Any?) throws -> Map {
+    guard let value = value else {
+        return .null
+    }
+
+    if let mapRepresentable = value as? MapRepresentable {
+        return mapRepresentable.map
+    }
+
+    if let mapFallibleRepresentable = value as? MapFallibleRepresentable {
+        return try mapFallibleRepresentable.asMap()
+    }
+
+    let props = try properties(value)
+
+    var dictionary = [String: Map](minimumCapacity: props.count)
+
+    for property in props {
+        dictionary[property.key] = try map(from: property.value)
+    }
+
+    return .dictionary(dictionary)
+}
+
+public func assertMappable(_ type: Any.Type) throws {
+    if type is MapRepresentable.Type {
+        return
+    }
+
+    if type is MapFallibleRepresentable.Type {
+        return
+    }
+
+    for property in try properties(type) {
+        try assertMappable(property.type)
+    }
+}
+
+extension MapFallibleRepresentable {
+    public func asMap() throws -> Map {
+        let props = try properties(self)
+        var dictionary = [String: Map](minimumCapacity: props.count)
+        for property in props {
+            guard let representable = property.value as? MapFallibleRepresentable else {
+                throw MapError.notMapRepresentable(type(of: property.value))
+            }
+            dictionary[property.key] = try representable.asMap()
+        }
+        return .dictionary(dictionary)
+    }
+}
+
 extension Map : MapRepresentable {
     public var map: Map {
         return self
@@ -77,11 +129,8 @@ extension Dictionary where Key : MapDictionaryKeyRepresentable, Value : MapRepre
 
 extension Optional : MapFallibleRepresentable {
     public func asMap() throws -> Map {
-        guard Wrapped.self is MapFallibleRepresentable.Type else {
-            throw MapError.notMapRepresentable(Wrapped.self)
-        }
         if case .some(let wrapped as MapFallibleRepresentable) = self {
-            return try wrapped.asMap()
+            return try GraphQL.map(from: wrapped)
         }
         return .null
     }

@@ -11,10 +11,14 @@
  * (see the language/visitor API). Visitor methods are expected to return
  * GraphQLErrors, or Arrays of GraphQLErrors when invalid.
  */
-func validate(schema: GraphQLSchema, ast: Document, rules: [(ValidationContext) -> Visitor] = []) throws -> [GraphQLError] {
+func validate(
+    schema: GraphQLSchema,
+    ast: Document,
+    rules: [(ValidationContext) -> Visitor] = []
+) -> [GraphQLError] {
     let typeInfo = TypeInfo(schema: schema)
     let rules = rules.isEmpty ? specifiedRules : rules
-    return try visit(usingRules: rules, schema: schema, typeInfo: typeInfo, documentAST: ast)
+    return visit(usingRules: rules, schema: schema, typeInfo: typeInfo, documentAST: ast)
 }
 
 /**
@@ -23,19 +27,35 @@ func validate(schema: GraphQLSchema, ast: Document, rules: [(ValidationContext) 
  *
  * @internal
  */
-func visit(usingRules rules: [(ValidationContext) -> Visitor], schema: GraphQLSchema, typeInfo: TypeInfo, documentAST: Document) throws -> [GraphQLError] {
+func visit(
+    usingRules rules: [(ValidationContext) -> Visitor],
+    schema: GraphQLSchema,
+    typeInfo: TypeInfo,
+    documentAST: Document
+) -> [GraphQLError] {
     let context = ValidationContext(schema: schema, ast: documentAST, typeInfo: typeInfo)
     let visitors = rules.map({ rule in rule(context) })
-  // Visit the whole document with each instance of all provided rules.
-  try visit(root: documentAST, visitor: visitWithTypeInfo(typeInfo: typeInfo, visitor: visitInParallel(visitors: visitors)))
-  return context.errors
+    // Visit the whole document with each instance of all provided rules.
+    visit(root: documentAST, visitor: visitWithTypeInfo(typeInfo: typeInfo, visitor: visitInParallel(visitors: visitors)))
+    return context.errors
 }
 
-public enum HasSelectionSet : Hashable {
+enum HasSelectionSet {
     case operation(OperationDefinition)
     case fragment(FragmentDefinition)
 
-    public var hashValue: Int {
+    var node: Node {
+        switch self {
+        case .operation(let operation):
+            return operation
+        case .fragment(let fragment):
+            return fragment
+        }
+    }
+}
+
+extension HasSelectionSet : Hashable {
+    var hashValue: Int {
         switch self {
         case .operation(let operation):
             return operation.hashValue
@@ -43,20 +63,20 @@ public enum HasSelectionSet : Hashable {
             return fragment.hashValue
         }
     }
-}
 
-public func == (lhs: HasSelectionSet, rhs: HasSelectionSet) -> Bool {
-    switch (lhs, rhs) {
-    case (.operation(let l), .operation(let r)):
-        return l == r
-    case (.fragment(let l), .fragment(let r)):
-        return l == r
-    default:
-        return false
+    static func == (lhs: HasSelectionSet, rhs: HasSelectionSet) -> Bool {
+        switch (lhs, rhs) {
+        case (.operation(let l), .operation(let r)):
+            return l == r
+        case (.fragment(let l), .fragment(let r)):
+            return l == r
+        default:
+            return false
+        }
     }
 }
 
-public typealias VariableUsage = (node: Variable, type: GraphQLInputType?)
+typealias VariableUsage = (node: Variable, type: GraphQLInputType?)
 
 /**
  * An instance of this class is passed as the "this" context to all validators,
@@ -94,15 +114,16 @@ final class ValidationContext {
         var fragments = self.fragments
 
         if fragments.isEmpty {
-            var frags: [String: FragmentDefinition] = [:]
+            fragments = ast.definitions.reduce([:]) { frags, statement in
+                var frags = frags
 
-//            fragments = document.definitions.
-//            fragments = document.definitions.reduce((frags, statement) => {
-//                if (statement.kind === Kind.FRAGMENT_DEFINITION) {
-//                    frags[statement.name.value] = statement;
-//                }
-//                return frags;
-//                }, {});
+                if let statement = statement as? FragmentDefinition {
+                    frags[statement.name.value] = statement
+                }
+
+                return frags
+            }
+
             self.fragments = fragments
         }
 
@@ -117,13 +138,19 @@ final class ValidationContext {
             var setsToVisit: [SelectionSet] = [node]
 
             while let set = setsToVisit.popLast() {
-//                for selection in set.selections {
-//                    if selection.kind == .fragmentSpread {
-//                        spreads.append(selection)
-//                    } else if selection.selectionSet != nil {
-//                        setsToVisit.append(selection.selectionSet)
-//                    }
-//                }
+                for selection in set.selections {
+                    if let selection = selection as? FragmentSpread {
+                        spreads!.append(selection)
+                    }
+
+                    if let selection = selection as? InlineFragment {
+                        setsToVisit.append(selection.selectionSet)
+                    }
+
+                    if let selection = selection as? Field, let selectionSet = selection.selectionSet {
+                        setsToVisit.append(selectionSet)
+                    }
+                }
             }
 
             fragmentSpreads[node] = spreads
@@ -167,12 +194,19 @@ final class ValidationContext {
         if usages == nil {
             var newUsages: [VariableUsage] = []
             let typeInfo = TypeInfo(schema: schema)
-//            visit(node, visitWithTypeInfo(typeInfo, {
-//                VariableDefinition: () => false,
-//                Variable(variable) {
-//                    newUsages.push({ node: variable, type: typeInfo.getInputType() });
-//                }
-//            }
+
+            visit(root: node.node, visitor: visitWithTypeInfo(typeInfo: typeInfo, visitor: Visitor(enter: { node, _, _, _, _ in
+                if node is VariableDefinition {
+                    return .skip
+                }
+
+                if let variable = node as? Variable {
+                    newUsages.append(VariableUsage(node: variable, type: typeInfo.inputType))
+                }
+
+                return .continue
+            })))
+
             usages = newUsages
             variableUsages[node] = usages
         }
@@ -218,7 +252,7 @@ final class ValidationContext {
         return typeInfo.directive
     }
 
-    var argument: GraphQLArgument? {
+    var argument: GraphQLArgumentDefinition? {
         return typeInfo.argument
     }
 }

@@ -1,7 +1,7 @@
 /**
  * TypeInfo is a utility class which, given a GraphQL schema, can keep track
  * of the current field and type definitions at any point in a GraphQL document
- * AST during a recursive descent by calling `enter(node)` and `leave(node)`.
+ * AST during a recursive descent by calling `enter(node: node)` and `leave(node: node)`.
  */
 final class TypeInfo {
     let schema: GraphQLSchema;
@@ -10,7 +10,7 @@ final class TypeInfo {
     var inputTypeStack: [GraphQLInputType?]
     var fieldDefStack: [GraphQLFieldDefinition?]
     var directive: GraphQLDirective?
-    var argument: GraphQLArgument?
+    var argument: GraphQLArgumentDefinition?
 
     init(schema: GraphQLSchema) {
         self.schema = schema
@@ -106,12 +106,12 @@ final class TypeInfo {
             var argType: GraphQLInputType? = nil
 
             if let directive = self.directive {
-                if let argDef = directive.args.find({ $1.name == node.name.value }) {
+                if let argDef = directive.args.find({ $0.name == node.name.value }) {
                     argType = argDef.type
                     self.argument = argDef
                 }
             } else if let fieldDef = self.fieldDef {
-                if let argDef = fieldDef.args.find({ $1.name == node.name.value }) {
+                if let argDef = fieldDef.args.find({ $0.name == node.name.value }) {
                     argType = argDef.type
                     self.argument = argDef
                 }
@@ -176,20 +176,22 @@ final class TypeInfo {
 func getFieldDef(schema: GraphQLSchema, parentType: GraphQLType, fieldAST: Field) -> GraphQLFieldDefinition? {
     let name = fieldAST.name.value
 
-    //    if name == schemaMetaFieldDef.name && schema.queryType == parentType {
-    //        return schemaMetaFieldDef
-    //    }
-    //
-    //    if name == typeMetaFieldDef.name && schema.queryType == parentType {
-    //        return typeMetaFieldDef
-    //    }
-    //
-    //    if name == typeNameMetaFieldDef.name && (parentType is GraphQLObjectType ||
-    //                                             parentType is GraphQLInterfaceType ||
-    //                                             parentType is GraphQLUnionType) {
-    //        return typeNameMetaFieldDef
-    //    }
-    
+    if let parentType = parentType as? GraphQLNamedType {
+        if name == SchemaMetaFieldDef.name && schema.queryType.name == parentType.name {
+            return SchemaMetaFieldDef
+        }
+
+        if name == TypeMetaFieldDef.name && schema.queryType.name == parentType.name {
+            return TypeMetaFieldDef
+        }
+    }
+
+    if name == TypeNameMetaFieldDef.name && (parentType is GraphQLObjectType ||
+                                             parentType is GraphQLInterfaceType ||
+                                             parentType is GraphQLUnionType) {
+        return TypeNameMetaFieldDef
+    }
+
     if let parentType = parentType as? GraphQLObjectType {
         return parentType.fields[name]
     }

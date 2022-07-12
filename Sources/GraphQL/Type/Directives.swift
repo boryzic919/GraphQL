@@ -21,6 +21,12 @@ public enum DirectiveLocation : String {
     case inputFieldDefinition = "INPUT_FIELD_DEFINITION"
 }
 
+extension DirectiveLocation : MapRepresentable {
+    public var map: Map {
+        return rawValue.map
+    }
+}
+
 /**
  * Directives are used by the GraphQL runtime as a way of modifying execution
  * behavior. Type system creators will usually not create these directly.
@@ -29,9 +35,14 @@ public struct GraphQLDirective {
     let name: String
     let description: String
     let locations: [DirectiveLocation]
-    let args: GraphQLArgumentMap
+    let args: [GraphQLArgumentDefinition]
 
-    public init(name: String, description: String, locations: [DirectiveLocation], args: GraphQLArgumentConfigMap = [:]) throws {
+    public init(
+        name: String,
+        description: String,
+        locations: [DirectiveLocation],
+        args: GraphQLArgumentConfigMap = [:]
+    ) throws {
         try assertValid(name: name)
         self.name = name
         self.description = description
@@ -40,6 +51,16 @@ public struct GraphQLDirective {
     }
 }
 
+extension GraphQLDirective : MapRepresentable {
+    public var map: Map {
+        return [
+            "name": name.map,
+            "description": description.map,
+            "locations": locations.map,
+            "arg": args.map,
+        ]
+    }
+}
 
 /**
  * Used to conditionally include fields or fragments.
@@ -55,7 +76,7 @@ let GraphQLIncludeDirective = try! GraphQLDirective(
         .inlineFragment,
     ],
     args: [
-        "if": GraphQLArgumentConfig(
+        "if": GraphQLArgument(
             type: GraphQLNonNull(GraphQLBoolean),
             description: "Included when true."
         )
@@ -76,7 +97,7 @@ let GraphQLSkipDirective = try! GraphQLDirective(
         .inlineFragment,
     ],
     args: [
-        "if": GraphQLArgumentConfig(
+        "if": GraphQLArgument(
             type: GraphQLNonNull(GraphQLBoolean),
             description: "Skipped when true."
         )
@@ -86,7 +107,7 @@ let GraphQLSkipDirective = try! GraphQLDirective(
 /**
  * Constant string used for default reason for a deprecation.
  */
-let defaulDeprecationReason: Map = .string("No longer supported")
+let defaulDeprecationReason: Map = .string("\"No longer supported\"")
 
 /**
  * Used to declare element of a GraphQL schema as deprecated.
@@ -100,7 +121,7 @@ let GraphQLDeprecatedDirective = try! GraphQLDirective(
         .enumValue,
         ],
     args: [
-        "if": GraphQLArgumentConfig(
+        "if": GraphQLArgument(
             type: GraphQLNonNull(GraphQLBoolean),
             description:
             "Explains why this element was deprecated, usually also including a " +

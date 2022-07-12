@@ -1,3 +1,5 @@
+import GraphQL
+
 /**
  * This defines a basic set of data for our Star Wars Schema.
  *
@@ -10,6 +12,14 @@ enum Episode : String {
     case newHope = "NEWHOPE"
     case empire = "EMPIRE"
     case jedi = "JEDI"
+
+    init?(_ string: String?) {
+        guard let string = string else {
+            return nil
+        }
+
+        self.init(rawValue: string)
+    }
 }
 
 protocol Character {
@@ -89,7 +99,7 @@ let humanData: [String: Human] = [
     "1004": tarkin,
 ]
 
-let threepio = Droid(
+let c3po = Droid(
     id: "2000",
     name: "C-3PO",
     friends: ["1000", "1002", "1003", "2001"],
@@ -97,7 +107,7 @@ let threepio = Droid(
     primaryFunction: "Protocol"
 )
 
-let artoo = Droid(
+let r2d2 = Droid(
     id: "2001",
     name: "R2-D2",
     friends: [ "1000", "1002", "1003" ],
@@ -106,8 +116,8 @@ let artoo = Droid(
 )
 
 let droidData: [String: Droid] = [
-    "2000": threepio,
-    "2001": artoo,
+    "2000": c3po,
+    "2001": r2d2,
 ]
 
 /**
@@ -139,8 +149,8 @@ func getHero(episode: Episode?) -> Character {
         // Luke is the hero of Episode V.
         return luke
     }
-    // Artoo is the hero otherwise.
-    return artoo
+    // R2-D2 is the hero otherwise.
+    return r2d2
 }
 
 /**

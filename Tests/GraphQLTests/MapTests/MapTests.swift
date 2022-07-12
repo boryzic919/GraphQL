@@ -545,9 +545,13 @@ public class MapTests : XCTestCase {
             "string": "foo\nbar",
         ]
 
-        let description = "{\"array\":[[],true,0x626172,{},4.2,1969,null,\"foo\\nbar\"],\"bool\":true,\"dictionary\":{\"array\":[],\"bool\":true,\"dictionary\":{},\"double\":4.2,\"int\":1969,\"null\":null,\"string\":\"foo\\nbar\"},\"double\":4.2,\"int\":1969,\"null\":null,\"string\":\"foo\\nbar\"}"
+        let description = "{\"array\":[[],true,{},4.2,1969,null,\"foo\\nbar\"],\"bool\":true,\"dictionary\":{\"array\":[],\"bool\":true,\"dictionary\":{},\"double\":4.2,\"int\":1969,\"null\":null,\"string\":\"foo\\nbar\"},\"double\":4.2,\"int\":1969,\"null\":null,\"string\":\"foo\\nbar\"}"
 
-        XCTAssertEqual(buffer.description, description)
+        if _isDebugAssertConfiguration() {
+            XCTAssertEqual(buffer.description.characters.count, 465)
+        } else {
+            XCTAssertEqual(buffer.description, description)
+        }
     }
 
     func testEquality() {
@@ -682,7 +686,7 @@ public class MapTests : XCTestCase {
             let foo: Bar
 
             func asMap() throws -> Map {
-                return try ["bar": foo.asMap()]
+                return try ["foo": foo.asMap()]
             }
         }
 
@@ -709,13 +713,11 @@ public class MapTests : XCTestCase {
         XCTAssertEqual(optional.map, nil)
         XCTAssertEqual(Int?(1969).map, 1969)
         XCTAssertEqual([1969].map, [1969])
-        XCTAssertEqual([1969].mapArray, [.int(1969)])
         XCTAssertEqual(["foo": 1969].map, ["foo": 1969])
-        XCTAssertEqual(["foo": 1969].mapDictionary, ["foo": .int(1969)])
         XCTAssertEqual(try optional.asMap(), nil)
         XCTAssertEqual(try Int?(1969).asMap(), 1969)
         let fuuOptional: Baz? = nil
-        XCTAssertThrowsError(try fuuOptional.asMap())
+        XCTAssertEqual(try fuuOptional.asMap(), nil)
         XCTAssertEqual(try [1969].asMap(), [1969])
         let fuuArray: [Baz] = []
         XCTAssertEqual(try fuuArray.asMap(), [])

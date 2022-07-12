@@ -1,24 +1,3 @@
-
-
-
-
-
-//public enum Map {
-//    case yo
-//}
-//
-//public struct Schema {
-//    let query: ObjectType
-//
-//    public init(query: ObjectType) {
-//        self.query = query
-//    }
-//
-//    public func execute(_ query: String) throws -> Map {
-//        return .yo
-//    }
-//}
-
 /**
  * Schema Definition
  *
@@ -28,10 +7,10 @@
  *
  * Example:
  *
- *     const MyAppSchema = new GraphQLSchema({
- *       query: MyAppQueryRootType,
- *       mutation: MyAppMutationRootType,
- *     })
+ *     let MyAppSchema = GraphQLSchema(
+ *         query: MyAppQueryRootType,
+ *         mutation: MyAppMutationRootType,
+ *     )
  *
  * Note: If an array of `directives` are provided to GraphQLSchema, that will be
  * the exact list of directives represented and allowed. If `directives` is not
@@ -39,10 +18,11 @@
  * @skip) will be used. If you wish to provide *additional* directives to these
  * specified directives, you must explicitly declare them. Example:
  *
- *     const MyAppSchema = new GraphQLSchema({
- *       ...
- *       directives: specifiedDirectives.concat([ myCustomDirective ]),
- *     })
+ *     let MyAppSchema = GraphQLSchema(
+ *         ...
+ *         directives: specifiedDirectives + [myCustomDirective],
+ *         ...
+ *     )
  *
  */
 public final class GraphQLSchema {
@@ -54,7 +34,13 @@ public final class GraphQLSchema {
     let implementations: [String: [GraphQLObjectType]]
     var possibleTypeMap: [String: [String: Bool]] = [:]
 
-    public init(query: GraphQLObjectType, mutation: GraphQLObjectType? = nil, subscription: GraphQLObjectType? = nil, types: [GraphQLNamedType] = [], directives: [GraphQLDirective] = []) throws {
+    public init(
+        query: GraphQLObjectType,
+        mutation: GraphQLObjectType? = nil,
+        subscription: GraphQLObjectType? = nil,
+        types: [GraphQLNamedType] = [],
+        directives: [GraphQLDirective] = []
+    ) throws {
         self.queryType = query
         self.mutationType = mutation
         self.subscriptionType = subscription
@@ -75,19 +61,20 @@ public final class GraphQLSchema {
             initialTypes.append(subscription)
         }
 
-        //initialTypes.append(__Schema)
+        initialTypes.append(__Schema)
 
         if !types.isEmpty {
             initialTypes.append(contentsOf: types)
         }
 
-        var map = TypeMap()
+        var typeMap = TypeMap()
 
         for type in initialTypes {
-            map = try typeMapReducer(map: map, type: type)
+            typeMap = try typeMapReducer(typeMap: typeMap, type: type)
         }
 
-        self.typeMap = map
+        self.typeMap = typeMap
+        try replaceTypeReferences(typeMap: typeMap)
 
         // Keep track of all implementations by interface name.
         var implementations: [String: [GraphQLObjectType]] = [:]
@@ -115,8 +102,6 @@ public final class GraphQLSchema {
                 }
             }
         }
-
-        try replaceTypeReferences(schema: self)
     }
 
     func getType(name: String) -> GraphQLNamedType? {
@@ -136,15 +121,17 @@ public final class GraphQLSchema {
         return []
     }
 
-    func isPossibleType(abstractType: GraphQLAbstractType, possibleType: GraphQLObjectType) -> Bool {
+    func isPossibleType(abstractType: GraphQLAbstractType, possibleType: GraphQLObjectType) throws -> Bool {
         if possibleTypeMap[abstractType.name] == nil {
             let possibleTypes = getPossibleTypes(abstractType: abstractType)
 
             guard !possibleTypes.isEmpty else {
-                let error = "Could not find possible implementing types for \(abstractType.name) " +
+                throw GraphQLError(
+                    message:
+                    "Could not find possible implementing types for \(abstractType.name) " +
                     "in schema. Check that schema.types is defined and is an array of " +
-                "all possible types in the schema."
-                return false
+                    "all possible types in the schema."
+                )
 
             }
 
@@ -169,48 +156,62 @@ public final class GraphQLSchema {
     }
 }
 
+extension GraphQLSchema : MapRepresentable {
+    public var map: Map {
+        return [
+            "queryType": queryType.map,
+            "mutationType": mutationType.map,
+            "subscriptionType": subscriptionType.map,
+            "directives":  directives.map,
+//            "types": typeMap.map,
+        ]
+    }
+}
+
 public typealias TypeMap = [String: GraphQLNamedType]
 
-func typeMapReducer(map: TypeMap, type: GraphQLType) throws -> TypeMap {
-    var map = map
+func typeMapReducer(typeMap: TypeMap, type: GraphQLType) throws -> TypeMap {
+    var typeMap = typeMap
 
     if let type = type as? GraphQLWrapperType {
-        return try typeMapReducer(map: map, type: type.wrappedType)
+        return try typeMapReducer(typeMap: typeMap, type: type.wrappedType)
     }
 
     guard let type = type as? GraphQLNamedType else {
-        return map // Should never happen
+        return typeMap // Should never happen
     }
 
-    //    guard map[type.name] == nil else {
-//    invariant(
-//        map[type.name] === type,
-//        'Schema must contain unique named types but contains multiple ' +
-//        `types named "${type.name}".`
-//    );
-    //    }
+    guard typeMap[type.name] == nil else {
+        guard typeMap[type.name]! == type else {
+            throw GraphQLError(
+                message:
+                "Schema must contain unique named types but contains multiple " +
+                "types named \"\(type.name)\"."
+            )
+        }
 
-    map[type.name] = type
+        return typeMap
+    }
 
-    var reducedMap = map
+    typeMap[type.name] = type
 
     if let type = type as? GraphQLUnionType {
-        reducedMap = try type.types.reduce(reducedMap, typeMapReducer)
+        typeMap = try type.types.reduce(typeMap, typeMapReducer)
     }
 
     if let type = type as? GraphQLObjectType {
-        reducedMap = try type.interfaces.reduce(reducedMap, typeMapReducer)
+        typeMap = try type.interfaces.reduce(typeMap, typeMapReducer)
     }
 
     if let type = type as? GraphQLObjectType {
         for (_, field) in type.fields {
 
             if !field.args.isEmpty {
-                let fieldArgTypes = field.args.values.map({ $0.type })
-                reducedMap = try fieldArgTypes.reduce(reducedMap, typeMapReducer)
+                let fieldArgTypes = field.args.map({ $0.type })
+                typeMap = try fieldArgTypes.reduce(typeMap, typeMapReducer)
             }
 
-            reducedMap = try typeMapReducer(map: reducedMap, type: field.type)
+            typeMap = try typeMapReducer(typeMap: typeMap, type: field.type)
         }
     }
 
@@ -218,104 +219,106 @@ func typeMapReducer(map: TypeMap, type: GraphQLType) throws -> TypeMap {
         for (_, field) in type.fields {
 
             if !field.args.isEmpty {
-                let fieldArgTypes = field.args.values.map({ $0.type })
-                reducedMap = try fieldArgTypes.reduce(reducedMap, typeMapReducer)
+                let fieldArgTypes = field.args.map({ $0.type })
+                typeMap = try fieldArgTypes.reduce(typeMap, typeMapReducer)
             }
 
-            reducedMap = try typeMapReducer(map: reducedMap, type: field.type)
+            typeMap = try typeMapReducer(typeMap: typeMap, type: field.type)
         }
     }
 
     if let type = type as? GraphQLInputObjectType {
         for (_, field) in type.fields {
-            reducedMap = try typeMapReducer(map: reducedMap, type: field.type)
+            typeMap = try typeMapReducer(typeMap: typeMap, type: field.type)
         }
     }
     
-    return reducedMap
+    return typeMap
 }
 
-public enum InterfaceImplementationError : Error {
-    case noImplementation(String)
-}
-
-func assert(object: GraphQLObjectType, implementsInterface interface: GraphQLInterfaceType, schema: GraphQLSchema) throws {
+func assert(
+    object: GraphQLObjectType,
+    implementsInterface interface: GraphQLInterfaceType,
+    schema: GraphQLSchema
+) throws {
     let objectFieldMap = object.fields
-    let ifaceFieldMap = interface.fields
+    let interfaceFieldMap = interface.fields
 
-    for (fieldName, ifaceField) in ifaceFieldMap {
+    for (fieldName, interfaceField) in interfaceFieldMap {
         guard let objectField = objectFieldMap[fieldName] else {
-            throw InterfaceImplementationError.noImplementation("\(interface.name) expects field \(fieldName) but \(object.name) does not provide it.")
+            throw GraphQLError(
+                message:
+                "\(interface.name) expects field \(fieldName) " +
+                "but \(object.name) does not provide it."
+            )
         }
 
-    }
+        // Assert interface field type is satisfied by object field type, by being
+        // a valid subtype. (covariant)
+        guard try isTypeSubTypeOf(schema, objectField.type, interfaceField.type) else {
+            throw GraphQLError(
+                message:
+                "\(interface.name).\(fieldName) expects type \"\(interfaceField.type)\" " +
+                "but " +
+                "\(object.name).\(fieldName) provides type \"\(objectField.type)\"."
+            )
+        }
 
-    //    // Assert interface field type is satisfied by object field type, by being
-    //    // a valid subtype. (covariant)
-    //    invariant(
-    //      isTypeSubTypeOf(schema, objectField.type, ifaceField.type),
-    //      `${iface.name}.${fieldName} expects type "${String(ifaceField.type)}" ` +
-    //      'but ' +
-    //      `${object.name}.${fieldName} provides type "${String(objectField.type)}".`
-    //    );
-    //
-    //    // Assert each interface field arg is implemented.
-    //    ifaceField.args.forEach(ifaceArg => {
-    //      const argName = ifaceArg.name;
-    //      const objectArg = find(objectField.args, arg => arg.name === argName);
-    //
-    //      // Assert interface field arg exists on object field.
-    //      invariant(
-    //        objectArg,
-    //        `${iface.name}.${fieldName} expects argument "${argName}" but ` +
-    //        `${object.name}.${fieldName} does not provide it.`
-    //      );
-    //
-    //      // Assert interface field arg type matches object field arg type.
-    //      // (invariant)
-    //      invariant(
-    //        isEqualType(ifaceArg.type, objectArg.type),
-    //        `${iface.name}.${fieldName}(${argName}:) expects type ` +
-    //        `"${String(ifaceArg.type)}" but ` +
-    //        `${object.name}.${fieldName}(${argName}:) provides type ` +
-    //        `"${String(objectArg.type)}".`
-    //      );
-    //    });
-    //
-    //    // Assert additional arguments must not be required.
-    //    objectField.args.forEach(objectArg => {
-    //      const argName = objectArg.name;
-    //      const ifaceArg = find(ifaceField.args, arg => arg.name === argName);
-    //      if (!ifaceArg) {
-    //        invariant(
-    //          !(objectArg.type instanceof GraphQLNonNull),
-    //          `${object.name}.${fieldName}(${argName}:) is of required type ` +
-    //          `"${String(objectArg.type)}" but is not also provided by the ` +
-    //          `interface ${iface.name}.${fieldName}.`
-    //        );
-    //      }
-    //    });
-    //  });
+        // Assert each interface field arg is implemented.
+        for interfaceArg in interfaceField.args {
+            let argName = interfaceArg.name
+            guard let objectArg = objectField.args.find({ $0.name == argName }) else {
+                throw GraphQLError(
+                    message:
+                    "\(interface.name).\(fieldName) expects argument \"\(argName)\" but " +
+                    "\(object.name).\(fieldName) does not provide it."
+                )
+            }
+
+            // Assert interface field arg type matches object field arg type.
+            // (invariant)
+            guard isEqualType(interfaceArg.type, objectArg.type) else {
+                throw GraphQLError(
+                    message:
+                    "\(interface.name).\(fieldName)(\(argName):) expects type " +
+                    "\"\(interfaceArg.type)\" but " +
+                    "\(object.name).\(fieldName)(\(argName):) provides type " +
+                    "\"\(objectArg.type)\"."
+                )
+            }
+        }
+
+        // Assert additional arguments must not be required.
+        for objectArg in objectField.args {
+            let argName = objectArg.name
+            if interfaceField.args.find({ $0.name == argName }) != nil {
+                guard !(objectArg.type is GraphQLNonNull) else {
+                    throw GraphQLError(
+                        message:
+                        "\(object.name).\(fieldName)(\(argName):) is of required type " +
+                        "\"\(objectArg.type)\" but is not also provided by the " +
+                        "interface \(interface.name).\(fieldName)."
+                    )
+                }
+            }
+        }
+    }
 }
 
-func replaceTypeReferences(schema: GraphQLSchema) throws {
-    schema.typeMap = try schema.typeMap.reduce([:]) { newTypeMap, type in
-        var newTypeMap = newTypeMap
-
-        if let fieldsContainer = type.value as? GraphQLFieldsContainer {
-            newTypeMap[type.key] = try fieldsContainer.replaceTypeReferences(typeMap: schema.typeMap)
-        } else {
-            newTypeMap[type.key] = type.value
+func replaceTypeReferences(typeMap: TypeMap) throws {
+    for type in typeMap {
+        if let typeReferenceContainer = type.value as? GraphQLTypeReferenceContainer {
+            try typeReferenceContainer.replaceTypeReferences(typeMap: typeMap)
         }
-
-        return newTypeMap
     }
 }
 
 func resolveTypeReference(type: GraphQLType, typeMap: TypeMap) throws -> GraphQLType {
     if let type = type as? GraphQLTypeReference {
         guard let resolvedType = typeMap[type.name] else {
-            throw GraphQLError(message: "Type \"\(type.name)\" not found in schema.")
+            throw GraphQLError(
+                message: "Type \"\(type.name)\" not found in schema."
+            )
         }
 
         return resolvedType

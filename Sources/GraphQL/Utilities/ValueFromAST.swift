@@ -1,17 +1,18 @@
 /**
- * Produces a JavaScript value given a GraphQL Value AST.
+ * Produces a Map value given a GraphQL Value AST.
  *
  * A GraphQL type must be provided, which will be used to interpret different
  * GraphQL Value literals.
  *
- * | GraphQL Value        | JSON Value    |
+ * | GraphQL Value        | Map Value     |
  * | -------------------- | ------------- |
- * | Input Object         | Object        |
- * | List                 | Array         |
- * | Boolean              | Boolean       |
- * | String               | String        |
- * | Int / Float          | Number        |
- * | Enum Value           | Mixed         |
+ * | Input Object         | .dictionary   |
+ * | List                 | .array        |
+ * | Boolean              | .bool         |
+ * | String               | .string       |
+ * | Int                  | .int          |
+ * | Float                | .float        |
+ * | Enum Value           | .string       |
  *
  */
 func valueFromAST(valueAST: Value?, type: GraphQLInputType, variables: [String: Map] = [:]) throws -> Map? {
@@ -64,7 +65,7 @@ func valueFromAST(valueAST: Value?, type: GraphQLInputType, variables: [String: 
         let fieldASTs = objectValue.fields.keyMap({ $0.name.value })
 
         return try .dictionary(fields.keys.reduce([:] as [String: Map]) { obj, fieldName in
-            var objCopy = obj
+            var obj = obj
             let field = fields[fieldName]
             let fieldAST = fieldASTs[fieldName]
             var fieldValue = try valueFromAST(
@@ -73,27 +74,25 @@ func valueFromAST(valueAST: Value?, type: GraphQLInputType, variables: [String: 
                 variables: variables
             )
 
-            if isNullish(fieldValue) {
+            if fieldValue == .null {
                 fieldValue = field?.defaultValue
-            }
-
-            if !isNullish(fieldValue) {
-                objCopy[fieldName] = fieldValue
+            } else {
+                obj[fieldName] = fieldValue
             }
             
-            return objCopy
+            return obj
         })
     }
     
     guard let type = type as? GraphQLLeafType else {
-        fatalError("Must be input type")
+        throw GraphQLError(message: "Must be leaf type")
     }
     
     let parsed = try type.parseLiteral(valueAST: valueAST)
     
-    if !isNullish(parsed) {
-        return parsed
+    guard parsed != .null else {
+        return nil
     }
     
-    return nil
+    return parsed
 }

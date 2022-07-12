@@ -11,7 +11,7 @@ func getVariableValues(schema: GraphQLSchema, definitionASTs: [VariableDefinitio
         valuesCopy[varName] = try getVariableValue(
             schema: schema,
             definitionAST: defAST,
-            input: inputs[varName]!
+            input: inputs[varName] ?? .null
         )
 
         return valuesCopy
@@ -23,7 +23,7 @@ func getVariableValues(schema: GraphQLSchema, definitionASTs: [VariableDefinitio
  * Prepares an object map of argument values given a list of argument
  * definitions and list of argument AST nodes.
  */
-func getArgumentValues(argDefs: GraphQLArgumentMap, argASTs: [Argument]?, variableValues: [String: Map] = [:]) throws -> [String: Map] {
+func getArgumentValues(argDefs: [GraphQLArgumentDefinition], argASTs: [Argument]?, variableValues: [String: Map] = [:]) throws -> Map {
     guard let argASTs = argASTs else {
         return [:]
     }
@@ -31,25 +31,25 @@ func getArgumentValues(argDefs: GraphQLArgumentMap, argASTs: [Argument]?, variab
     let argASTMap = argASTs.keyMap({ $0.name.value })
 
     return try argDefs.reduce([:]) { result, argDef in
-        var resultCopy = result
-        let name = argDef.value.name
+        var result = result
+        let name = argDef.name
         let valueAST = argASTMap[name]?.value
 
         var value = try valueFromAST(
             valueAST: valueAST,
-            type: argDef.value.type,
+            type: argDef.type,
             variables: variableValues
         )
 
-        if isNullish(value) {
-            value = argDef.value.defaultValue
+        if value == nil {
+            value = argDef.defaultValue
         }
 
-        if !isNullish(value) {
-            resultCopy[name] = value
+        if let value = value {
+            result[name] = value
         }
 
-        return resultCopy
+        return result
     }
 }
 
@@ -62,7 +62,7 @@ func getVariableValue(schema: GraphQLSchema, definitionAST: VariableDefinition, 
     let type = typeFromAST(schema: schema, inputTypeAST: definitionAST.type)
     let variable = definitionAST.variable
 
-    if type != nil || !isInputType(type: type) {
+    if type == nil || !isInputType(type: type) {
         throw GraphQLError(
             message:
             "Variable \"$\(variable.name.value)\" expected value of type " +
@@ -75,7 +75,7 @@ func getVariableValue(schema: GraphQLSchema, definitionAST: VariableDefinition, 
     let errors = try isValidValue(value: input, type: inputType)
 
     if errors.isEmpty {
-        if isNullish(input) {
+        if input == .null {
             if let defaultValue = definitionAST.defaultValue {
                 return try valueFromAST(valueAST: defaultValue, type: inputType)!
             }
@@ -84,7 +84,7 @@ func getVariableValue(schema: GraphQLSchema, definitionAST: VariableDefinition, 
         return try coerceValue(type: inputType, value: input)!
     }
 
-    if isNullish(input) {
+    guard input != .null else {
         throw GraphQLError(
             message:
             "Variable \"$\(variable.name.value)\" of required type " +
@@ -113,7 +113,7 @@ func coerceValue(type: GraphQLInputType, value: Map) throws -> Map? {
         return try coerceValue(type: nonNull.ofType as! GraphQLInputType, value: value)!
     }
 
-    if isNullish(value) {
+    guard value != .null else {
         return nil
     }
 
@@ -146,11 +146,9 @@ func coerceValue(type: GraphQLInputType, value: Map) throws -> Map? {
 
             var fieldValue = try coerceValue(type: field!.type, value: value[fieldName]!)
 
-            if isNullish(fieldValue) {
+            if fieldValue == .null {
                 fieldValue = field?.defaultValue
-            }
-
-            if !isNullish(fieldValue) {
+            } else {
                 objCopy[fieldName] = fieldValue
             }
 
@@ -159,14 +157,14 @@ func coerceValue(type: GraphQLInputType, value: Map) throws -> Map? {
     }
     
     guard let type = type as? GraphQLLeafType else {
-        fatalError("Must be input type")
+        throw GraphQLError(message: "Must be input type")
     }
     
     let parsed = try type.parseValue(value: value)
     
-    if !isNullish(parsed) {
-        return parsed
+    guard parsed != .null else {
+        return nil
     }
 
-    return nil
+    return parsed
 }
