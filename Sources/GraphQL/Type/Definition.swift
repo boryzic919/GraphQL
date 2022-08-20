@@ -47,7 +47,7 @@ extension GraphQLNonNull          : GraphQLOutputType {}
 /**
  * These types may describe types which may be leaf values.
  */
-public protocol GraphQLLeafType : GraphQLNamedType {
+public protocol GraphQLLeafType : GraphQLType, GraphQLNamedType {
     func serialize(value: Any) throws -> Map
     func parseValue(value: Map) throws -> Map
     func parseLiteral(valueAST: Value) throws -> Map
@@ -65,10 +65,10 @@ func isLeafType(type: GraphQLType?) -> Bool {
 /**
  * These types may describe the parent context of a selection set.
  */
-public protocol GraphQLCompositeType : GraphQLNamedType, GraphQLOutputType {}
-extension GraphQLObjectType          : GraphQLCompositeType                {}
-extension GraphQLInterfaceType       : GraphQLCompositeType                {}
-extension GraphQLUnionType           : GraphQLCompositeType                {}
+public protocol GraphQLCompositeType : GraphQLType, GraphQLNamedType, GraphQLOutputType {}
+extension GraphQLObjectType          : GraphQLCompositeType                             {}
+extension GraphQLInterfaceType       : GraphQLCompositeType                             {}
+extension GraphQLUnionType           : GraphQLCompositeType                             {}
 
 protocol GraphQLTypeReferenceContainer : GraphQLNamedType {
     func replaceTypeReferences(typeMap: TypeMap) throws
@@ -80,7 +80,7 @@ extension GraphQLInterfaceType : GraphQLTypeReferenceContainer {}
 /**
  * These types may describe the parent context of a selection set.
  */
-public protocol GraphQLAbstractType : GraphQLNamedType {
+public protocol GraphQLAbstractType : GraphQLType, GraphQLNamedType {
     var resolveType: GraphQLTypeResolve? { get }
 }
 
@@ -110,7 +110,7 @@ func getNullableType(type: GraphQLType?) -> GraphQLNullableType? {
 /**
  * These named types do not include modifiers like List or NonNull.
  */
-public protocol GraphQLNamedType : GraphQLNullableType {
+public protocol GraphQLNamedType : GraphQLType, GraphQLNullableType, MapRepresentable {
     var name: String { get }
 }
 
@@ -160,7 +160,7 @@ extension GraphQLNonNull : GraphQLWrapperType {}
  */
 public final class GraphQLScalarType {
     public let name: String
-    public let description: String?
+    let description: String?
     let serialize: (Any) throws -> Map
     let parseValue: ((Map) throws -> Map)?
     let parseLiteral: ((Value) throws -> Map)?
@@ -277,10 +277,10 @@ extension GraphQLScalarType : Hashable {
  */
 public final class GraphQLObjectType {
     public let name: String
-    public let description: String?
-    public let fields: GraphQLFieldDefinitionMap
-    public let interfaces: [GraphQLInterfaceType]
-    public let isTypeOf: GraphQLIsTypeOf?
+    let description: String?
+    var fields: GraphQLFieldDefinitionMap
+    let interfaces: [GraphQLInterfaceType]
+    let isTypeOf: GraphQLIsTypeOf?
 
     public init(
         name: String,
@@ -452,26 +452,26 @@ public typealias GraphQLFieldResolve = (
 ) throws -> Any?
 
 public struct GraphQLResolveInfo {
-    public let fieldName: String
-    public let fieldASTs: [Field]
-    public let returnType: GraphQLOutputType
-    public let parentType: GraphQLCompositeType
-    public let path: [IndexPathElement]
-    public let schema: GraphQLSchema
-    public let fragments: [String: FragmentDefinition]
-    public let rootValue: Any
-    public let operation: OperationDefinition
-    public let variableValues: [String: Any]
+    let fieldName: String
+    let fieldASTs: [Field]
+    let returnType: GraphQLOutputType
+    let parentType: GraphQLCompositeType
+    let path: [IndexPathElement]
+    let schema: GraphQLSchema
+    let fragments: [String: FragmentDefinition]
+    let rootValue: Any
+    let operation: OperationDefinition
+    let variableValues: [String: Any]
 }
 
 public typealias GraphQLFieldMap = [String: GraphQLField]
 
 public struct GraphQLField {
-    public let type: GraphQLOutputType
-    public let args: GraphQLArgumentConfigMap
-    public let deprecationReason: String?
-    public let description: String?
-    public let resolve: GraphQLFieldResolve?
+    let type: GraphQLOutputType
+    let args: GraphQLArgumentConfigMap
+    let deprecationReason: String?
+    let description: String?
+    let resolve: GraphQLFieldResolve?
 
     public init(
         type: GraphQLOutputType,
@@ -491,13 +491,13 @@ public struct GraphQLField {
 public typealias GraphQLFieldDefinitionMap = [String: GraphQLFieldDefinition]
 
 public final class GraphQLFieldDefinition {
-    public let name: String
-    public let description: String?
-    public internal(set) var type: GraphQLOutputType
-    public let args: [GraphQLArgumentDefinition]
-    public let resolve: GraphQLFieldResolve?
-    public let deprecationReason: String?
-    public let isDeprecated: Bool
+    let name: String
+    let description: String?
+    var type: GraphQLOutputType
+    let args: [GraphQLArgumentDefinition]
+    let resolve: GraphQLFieldResolve?
+    let deprecationReason: String?
+    let isDeprecated: Bool
 
     init(
         name: String,
@@ -545,9 +545,9 @@ extension GraphQLFieldDefinition : MapRepresentable {
 public typealias GraphQLArgumentConfigMap = [String: GraphQLArgument]
 
 public struct GraphQLArgument {
-    public let type: GraphQLInputType
-    public let description: String?
-    public let defaultValue: Map?
+    let type: GraphQLInputType
+    let description: String?
+    let defaultValue: Map?
 
     public init(
         type: GraphQLInputType,
@@ -561,10 +561,10 @@ public struct GraphQLArgument {
 }
 
 public struct GraphQLArgumentDefinition {
-    public let name: String
-    public let type: GraphQLInputType
-    public let defaultValue: Map?
-    public let description: String?
+    let name: String
+    let type: GraphQLInputType
+    let defaultValue: Map?
+    let description: String?
 
     init(
         name: String,
@@ -610,10 +610,10 @@ extension GraphQLArgumentDefinition : MapRepresentable {
  */
 public final class GraphQLInterfaceType {
     public let name: String
-    public let description: String?
+    let description: String?
     public let resolveType: GraphQLTypeResolve?
 
-    public let fields: GraphQLFieldDefinitionMap
+    let fields: GraphQLFieldDefinitionMap
 
     public init(
         name: String,
@@ -692,13 +692,13 @@ extension GraphQLInterfaceType : Hashable {
  */
 public final class GraphQLUnionType {
     public let name: String
-    public let description: String?
+    let description: String?
     public let resolveType: GraphQLTypeResolve?
 
-    public let types: [GraphQLObjectType]
-    public let possibleTypeNames: [String: Bool]
+    let types: [GraphQLObjectType]
+    let possibleTypeNames: [String: Bool]
 
-    public init(
+    init(
         name: String,
         description: String? = nil,
         resolveType: GraphQLTypeResolve? = nil,
@@ -797,11 +797,11 @@ func defineTypes(
  */
 public final class GraphQLEnumType {
     public let name: String
-    public let description: String?
+    let description: String?
 
-    public let values: [GraphQLEnumValueDefinition]
-    public let valueLookup: [Map: GraphQLEnumValueDefinition]
-    public let nameLookup: [String: GraphQLEnumValueDefinition]
+    let values: [GraphQLEnumValueDefinition]
+    let valueLookup: [Map: GraphQLEnumValueDefinition]
+    let nameLookup: [String: GraphQLEnumValueDefinition]
 
     public init(
         name: String,
@@ -913,9 +913,9 @@ func defineEnumValues(
 public typealias GraphQLEnumValueMap = [String: GraphQLEnumValue]
 
 public struct GraphQLEnumValue {
-    public let value: Map
-    public let description: String?
-    public let deprecationReason: String?
+    let value: Map
+    let description: String?
+    let deprecationReason: String?
 
     public init(
         value: MapRepresentable,
@@ -928,16 +928,16 @@ public struct GraphQLEnumValue {
     }
 }
 
-public struct GraphQLEnumValueDefinition {
-    public let name: String
-    public let description: String?
-    public let deprecationReason: String?
-    public let isDeprecated: Bool
-    public let value: Map
+struct GraphQLEnumValueDefinition {
+    let name: String
+    let description: String?
+    let deprecationReason: String?
+    let isDeprecated: Bool
+    let value: Map
 }
 
 extension GraphQLEnumValueDefinition : MapRepresentable {
-    public var map: Map {
+    var map: Map {
         return [
             "name": name.map,
             "description": description.map,
@@ -969,11 +969,11 @@ extension GraphQLEnumValueDefinition : MapRepresentable {
  */
 public final class GraphQLInputObjectType {
     public let name: String
-    public let description: String?
+    let description: String?
 
-    public let fields: InputObjectFieldMap
+    let fields: InputObjectFieldMap
 
-    public init(
+    init(
         name: String,
         description: String? = nil,
         fields: InputObjectConfigFieldMap
@@ -1045,29 +1045,23 @@ func defineInputObjectFieldMap(
     return resultFieldMap
 }
 
-public struct InputObjectField {
-    public let type: GraphQLInputType
-    public let defaultValue: Map?
-    public let description: String?
-    
-    public init(type: GraphQLInputType, defaultValue: Map? = nil, description: String? = nil) {
-        self.type = type
-        self.defaultValue = defaultValue
-        self.description = description
-    }
+struct InputObjectField {
+    let type: GraphQLInputType
+    let defaultValue: Map?
+    let description: String?
 }
 
-public typealias InputObjectConfigFieldMap = [String: InputObjectField]
+typealias InputObjectConfigFieldMap = [String: InputObjectField]
 
-public struct InputObjectFieldDefinition {
-    public let name: String
-    public let description: String?
-    public let type: GraphQLInputType
-    public let defaultValue: Map?
+struct InputObjectFieldDefinition {
+    let name: String
+    let description: String?
+    let type: GraphQLInputType
+    let defaultValue: Map?
 }
 
 extension InputObjectFieldDefinition : MapRepresentable {
-    public var map: Map {
+    var map: Map {
         return [
             "name": name.map,
             "description": description.map,
@@ -1077,7 +1071,7 @@ extension InputObjectFieldDefinition : MapRepresentable {
     }
 }
 
-public typealias InputObjectFieldMap = [String: InputObjectFieldDefinition]
+typealias InputObjectFieldMap = [String: InputObjectFieldDefinition]
 
 /**
  * List Modifier
@@ -1098,7 +1092,7 @@ public typealias InputObjectFieldMap = [String: InputObjectFieldDefinition]
  *
  */
 public final class GraphQLList {
-    public let ofType: GraphQLType
+    let ofType: GraphQLType
 
     public init(_ type: GraphQLType) {
         self.ofType = type
@@ -1221,7 +1215,7 @@ extension GraphQLNonNull : Hashable {
  * object when the schema is built.
  */
 public final class GraphQLTypeReference : GraphQLType, GraphQLOutputType, GraphQLNullableType {
-    public let name: String
+    let name: String
 
     public init(_ name: String) {
         self.name = name

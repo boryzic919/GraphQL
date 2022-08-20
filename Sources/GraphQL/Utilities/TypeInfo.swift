@@ -95,8 +95,8 @@ final class TypeInfo {
             typeStack.append(outputType as? GraphQLOutputType)
 
         case let node as FragmentDefinition:
-            let outputType = typeFromAST(schema: schema, inputTypeAST: node.typeCondition)
-            typeStack.append(outputType as? GraphQLOutputType)
+            let typeConditionAST = node.typeCondition
+            typeStack.append(typeConditionAST as? GraphQLOutputType)
 
         case let node as VariableDefinition:
             let inputType = typeFromAST(schema: schema, inputTypeAST: node.type)

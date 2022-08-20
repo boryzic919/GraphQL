@@ -8,7 +8,7 @@ class HelloWorldTests : XCTestCase {
             fields: [
                 "hello": GraphQLField(
                     type: GraphQLString,
-                    resolve: { _, _, _, _ in "world" }
+                    resolve: { _ in "world" }
                 )
             ]
         )

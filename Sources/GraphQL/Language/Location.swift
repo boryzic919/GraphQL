@@ -1,6 +1,6 @@
 import Foundation
 
-public typealias SourceLocation = (line: Int, column: Int)
+typealias SourceLocation = (line: Int, column: Int)
 
 /**
  * Takes a Source and a UTF-8 character offset, and returns the corresponding
@@ -10,7 +10,11 @@ func getLocation(source: Source, position: Int) -> SourceLocation {
     var line = 1
     var column = position + 1
 
-    let regex = try! NSRegularExpression(pattern: "\r\n|[\n\r]", options: [])
+    #if os(macOS)
+        let regex = try! NSRegularExpression(pattern: "\r\n|[\n\r]", options: [])
+    #else
+        let regex = try! RegularExpression(pattern: "\r\n|[\n\r]", options: [])
+    #endif
 
     let matches = regex.matches(in: source.body, options: [], range: NSRange(0..<source.body.utf16.count))
 

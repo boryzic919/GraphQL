@@ -6,32 +6,25 @@
 //
 //
 
-protocol AnyExtensions {}
+public protocol AnyExtensions {}
 
-extension AnyExtensions {
+public extension AnyExtensions {
     
     static func construct(constructor: (Property.Description) throws -> Any) throws -> Any {
-        return try GraphQL.constructGenericType(self, constructor: constructor)
+        return try GraphQL.construct(self, constructor: constructor)
     }
     
-    static func isValueTypeOrSubtype(_ value: Any) -> Bool {
-        return value is Self
+    static func construct(dictionary: [String: Any]) throws -> Any {
+        return try GraphQL.construct(self, dictionary: dictionary)
     }
     
-    static func value(from storage: UnsafeRawPointer) -> Any {
-        return storage.assumingMemoryBound(to: self).pointee
-    }
-    
-    static func write(_ value: Any, to storage: UnsafeMutableRawPointer) throws {
-        guard let this = value as? Self else {
-            throw ReflectionError.valueIsNotType(value: value, type: self)
-        }
-        storage.assumingMemoryBound(to: self).initialize(to: this)
+    func write(to pointer: UnsafeMutableRawPointer) {
+        pointer.assumingMemoryBound(to: type(of: self)).initialize(to: self)
     }
     
 }
 
-func extensions(of type: Any.Type) -> AnyExtensions.Type {
+public func extensions(of type: Any.Type) -> AnyExtensions.Type {
     struct Extensions : AnyExtensions {}
     var extensions: AnyExtensions.Type = Extensions.self
     withUnsafePointer(to: &extensions) { pointer in
@@ -40,7 +33,7 @@ func extensions(of type: Any.Type) -> AnyExtensions.Type {
     return extensions
 }
 
-func extensions(of value: Any) -> AnyExtensions {
+public func extensions(of value: Any) -> AnyExtensions {
     struct Extensions : AnyExtensions {}
     var extensions: AnyExtensions = Extensions()
     withUnsafePointer(to: &extensions) { pointer in

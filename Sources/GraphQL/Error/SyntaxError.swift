@@ -49,9 +49,13 @@ func highlightSourceAtLocation(source: Source, location: SourceLocation) -> Stri
 }
 
 func splitLines(string: String) -> [String] {
-
-    let nsstring = NSString(string: string)
-    let regex = try! NSRegularExpression(pattern: "\r\n|[\n\r]", options: [])
+    #if os(macOS)
+        let nsstring = string as NSString
+        let regex = try! NSRegularExpression(pattern: "\r\n|[\n\r]", options: [])
+    #else
+        let nsstring = NSString(string: string)
+        let regex = try! RegularExpression(pattern: "\r\n|[\n\r]", options: [])
+    #endif
 
     var lines: [String] = []
     var location = 0

@@ -32,10 +32,10 @@ extension DirectiveLocation : MapRepresentable {
  * behavior. Type system creators will usually not create these directly.
  */
 public struct GraphQLDirective {
-    public let name: String
-    public let description: String
-    public let locations: [DirectiveLocation]
-    public let args: [GraphQLArgumentDefinition]
+    let name: String
+    let description: String
+    let locations: [DirectiveLocation]
+    let args: [GraphQLArgumentDefinition]
 
     public init(
         name: String,
@@ -65,7 +65,7 @@ extension GraphQLDirective : MapRepresentable {
 /**
  * Used to conditionally include fields or fragments.
  */
-public let GraphQLIncludeDirective = try! GraphQLDirective(
+let GraphQLIncludeDirective = try! GraphQLDirective(
     name: "include",
     description:
     "Directs the executor to include this field or fragment only when " +
@@ -86,7 +86,7 @@ public let GraphQLIncludeDirective = try! GraphQLDirective(
 /**
  * Used to conditionally skip (exclude) fields or fragments.
  */
-public let GraphQLSkipDirective = try! GraphQLDirective(
+let GraphQLSkipDirective = try! GraphQLDirective(
     name: "skip",
     description:
     "Directs the executor to skip this field or fragment when the `if` " +
@@ -112,7 +112,7 @@ let defaulDeprecationReason: Map = .string("\"No longer supported\"")
 /**
  * Used to declare element of a GraphQL schema as deprecated.
  */
-public let GraphQLDeprecatedDirective = try! GraphQLDirective(
+let GraphQLDeprecatedDirective = try! GraphQLDirective(
     name: "deprecated",
     description:
     "Marks an element of a GraphQL schema as no longer supported.",
