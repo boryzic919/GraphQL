@@ -199,6 +199,15 @@ class LexerTests : XCTestCase {
         XCTAssertEqual(token, expected)
     }
 
+    func testLongStrings() throws {
+        measure {
+            let token = try! lexOne("\"\(String(repeating: "123456", count: 10_000))\"")
+
+            XCTAssertEqual(token.start, 0)
+            XCTAssertEqual(token.end, 60_002)
+        }
+    }
+
     func testStringErrors() throws {
         XCTAssertThrowsError(try lexOne("\""))
         // "Syntax Error GraphQL (1:2) Unterminated string"
@@ -742,6 +751,7 @@ extension LexerTests {
             ("testRecordsLineAndColumn", testRecordsLineAndColumn),
             ("testTokenDescription", testTokenDescription),
             ("testSkipsWhitespace", testSkipsWhitespace),
+            ("testSkipsComments", testSkipsComments),
             ("testSkipsCommas", testSkipsCommas),
             ("testErrorsRespectWhitespaces", testErrorsRespectWhitespaces),
             ("testStrings", testStrings),

@@ -79,8 +79,11 @@ func getVariableValue(schema: GraphQLSchema, definitionAST: VariableDefinition, 
             if let defaultValue = definitionAST.defaultValue {
                 return try valueFromAST(valueAST: defaultValue, type: inputType)!
             }
+            else if !(inputType is GraphQLNonNull) {
+                return .null
+            }
         }
-
+        
         return try coerceValue(type: inputType, value: input)!
     }
 
@@ -144,7 +147,7 @@ func coerceValue(type: GraphQLInputType, value: Map) throws -> Map? {
             var objCopy = obj
             let field = fields[fieldName]
 
-            var fieldValue = try coerceValue(type: field!.type, value: value[fieldName]!)
+            var fieldValue = try coerceValue(type: field!.type, value: value[fieldName] ?? .null)
 
             if fieldValue == .null {
                 fieldValue = field?.defaultValue

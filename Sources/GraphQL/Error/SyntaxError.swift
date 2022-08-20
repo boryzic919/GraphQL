@@ -28,7 +28,7 @@ func highlightSourceAtLocation(source: Source, location: SourceLocation) -> Stri
     let prevLineNum = (line - 1).description
     let lineNum = line.description
     let nextLineNum = (line + 1).description
-    let padLength = nextLineNum.characters.count
+    let padLength = nextLineNum.count
 
     let lines = splitLines(string: source.body)
 
@@ -49,13 +49,9 @@ func highlightSourceAtLocation(source: Source, location: SourceLocation) -> Stri
 }
 
 func splitLines(string: String) -> [String] {
-    #if os(macOS)
-        let nsstring = string as NSString
-        let regex = try! NSRegularExpression(pattern: "\r\n|[\n\r]", options: [])
-    #else
-        let nsstring = NSString(string: string)
-        let regex = try! RegularExpression(pattern: "\r\n|[\n\r]", options: [])
-    #endif
+
+    let nsstring = NSString(string: string)
+    let regex = try! NSRegularExpression(pattern: "\r\n|[\n\r]", options: [])
 
     var lines: [String] = []
     var location = 0
@@ -77,5 +73,5 @@ func splitLines(string: String) -> [String] {
 }
 
 func leftpad(_ length: Int, _ string: String) -> String {
-    return String(repeating: " ", count: max(length - string.characters.count + 1, 0)) + string
+    return String(repeating: " ", count: max(length - string.count + 1, 0)) + string
 }
